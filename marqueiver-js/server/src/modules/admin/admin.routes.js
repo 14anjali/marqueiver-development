@@ -1,0 +1,23 @@
+import { Router } from 'express';
+import { authenticate, requireRole, requireAdminLevel } from '../../middleware/auth.js';
+import { validate } from '../../middleware/validate.js';
+import * as c from './admin.controller.js';
+const router = Router();
+// Bootstrap is intentionally public but self-locking (only works when no admin exists).
+router.post('/bootstrap', c.bootstrapAdmin);
+router.use(authenticate, requireRole('admin'));
+router.get('/overview', c.overview);
+router.get('/analytics', c.analytics);
+router.get('/wallets', requireAdminLevel('finance'), c.walletsOverview);
+router.get('/verifications', c.listVerificationQueue);
+router.post('/verifications/:id', validate(c.decideVerificationSchema), c.decideVerification);
+router.get('/users', c.listUsers);
+router.get('/deals', c.listDeals);
+router.post('/deals/:id/resolve', requireAdminLevel('finance'), validate(c.resolveDealSchema), c.resolveDeal);
+router.post('/users/:id/suspend', requireAdminLevel('support', 'finance'), validate(c.suspendSchema), c.suspendUser);
+router.get('/reviews', c.listReviews);
+router.post('/reviews/:id/moderate', requireAdminLevel('support'), c.moderateReview);
+router.post('/team/invite', requireAdminLevel(), validate(c.inviteAdminSchema), c.inviteAdmin);
+router.get('/audit', c.auditLog);
+router.get('/export/:kind', requireAdminLevel('finance'), c.exportData);
+export default router;

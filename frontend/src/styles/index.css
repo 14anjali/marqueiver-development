@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light; }
+* { -webkit-font-smoothing: antialiased; }
+body { margin: 0; font-family: 'Inter', system-ui, sans-serif; color: #1A1A2E; background: #fff; }
+
+/* thin scrollbars for horizontal rails */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+@layer components {
+  .pill { @apply inline-flex items-center gap-1 rounded-full text-xs font-medium px-2.5 py-1; }
+  .chip { @apply inline-flex items-center gap-1 rounded-full bg-brand-50 text-brand-700 text-xs font-medium px-2.5 py-1; }
+  .stat-num { @apply font-display font-extrabold text-ink; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-lg font-semibold text-sm px-4 py-2.5 transition; }
+  .btn-cta { @apply btn text-white bg-cta-grad hover:opacity-95 shadow-sm; }
+  .btn-brand { @apply btn text-white bg-brand-600 hover:bg-brand-700; }
+  .btn-outline { @apply btn border border-brand-300 text-brand-700 hover:bg-brand-50; }
+  .btn-ghost { @apply btn border border-line text-ink hover:bg-bg; }
+  .card { @apply bg-white rounded-xl2 border border-line shadow-card; }
+}
+
+@keyframes slidein { from { transform: translateX(20px); opacity: 0 } to { transform: translateX(0); opacity: 1 } }

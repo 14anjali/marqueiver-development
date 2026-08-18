@@ -1,0 +1,13 @@
+import { Router } from 'express';
+import { authenticate, requireRole } from '../../middleware/auth.js';
+import { validate } from '../../middleware/validate.js';
+import * as c from './deals.controller.js';
+const router = Router();
+router.use(authenticate);
+router.post('/', requireRole('brand'), validate(c.createDealSchema), c.createDeal);
+router.get('/', c.listMyDeals);
+router.get('/:id', c.getDeal);
+router.post('/:id/payment-session', requireRole('brand'), c.startPaymentSession);
+router.post('/:id/transition', validate(c.transitionSchema), c.transition);
+router.post('/:id/submit', requireRole('creator'), validate(c.submitWorkSchema), c.submitWork);
+export default router;

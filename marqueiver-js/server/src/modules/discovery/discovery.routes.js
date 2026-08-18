@@ -1,0 +1,15 @@
+import { Router } from 'express';
+import { authenticate } from '../../middleware/auth.js';
+import { validate } from '../../middleware/validate.js';
+import * as c from './discovery.controller.js';
+const router = Router();
+router.use(authenticate);
+router.get('/creators', validate(c.searchCreatorsSchema, 'query'), c.searchCreators);
+router.get('/creators/export', validate(c.searchCreatorsSchema, 'query'), c.exportCreators);
+router.get('/creators/saved', c.listSavedCreators);
+router.post('/creators/:id/save', c.saveCreator);
+router.delete('/creators/:id/save', c.unsaveCreator);
+router.get('/creators/:id', c.getCreatorProfile);
+router.get('/brands', c.searchBrands);
+router.get('/brands/:id', c.getBrandProfile);
+export default router;
