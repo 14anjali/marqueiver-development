@@ -257,6 +257,71 @@ async function igGetFields(path, fields, accessToken, label) {
     `Instagram ${label} failed: no supported fields remained.`, { platform: 'instagram' });
 }
 
+/**
+ * Read a node's fields, trying each candidate node in turn.
+ *
+ * Only a *path* rejection moves to the next candidate — the host telling us the
+ * node is not routable. A bad token or a missing permission answers the same
+ * way whichever node is asked, so retrying those would only double the latency
+ * of a certain failure.
+ *
+ * Which node worked is logged, because "which node does this app's token
+ * actually address" is the question this integration has now got wrong twice,
+ * and it should be answerable from the logs rather than by reasoning.
+ */
+async function igGetFieldsFromNodes(nodes, fields, accessToken, label) {
+  let lastError;
+
+  for (let i = 0; i < nodes.length; i += 1) {
+    const kind = nodes[i] === 'me' ? 'me' : 'id';
+    const version = env.instagram.graphVersion ? `${env.instagram.graphVersion}/` : '';
+
+    logger.info('Instagram OAuth step:', {
+      operation: 'profileRequest',
+      status: 'started',
+      // Host and path only. The access token travels in the query string and
+      // must never reach a log line.
+      endpoint: `${IG_GRAPH_HOST}/${version}${nodes[i]}`,
+      node: kind,
+      fieldCount: fields.length,
+    });
+
+    try {
+      const result = await igGetFields(nodes[i], fields, accessToken, label);
+      logger.info('Instagram OAuth step:', {
+        operation: 'profileRequest',
+        status: 'ok',
+        node: kind,
+        fieldsReturned: Object.keys(result ?? {}),
+      });
+      return result;
+    } catch (err) {
+      lastError = err;
+
+      const pathRejected = isPathRejection({
+        error: {
+          code: err.details?.providerCode,
+          message: err.details?.providerMessage ?? err.message,
+        },
+      });
+
+      logger.warn('Instagram OAuth step failed:', {
+        operation: 'profileRequest',
+        node: kind,
+        status: err.details?.providerStatus ?? err.status,
+        providerCode: err.details?.providerCode ?? null,
+        providerMessage: err.details?.providerMessage ?? err.message,
+        willRetryOtherNode: pathRejected && i < nodes.length - 1,
+      });
+
+      if (pathRejected && i < nodes.length - 1) continue;
+      throw err;
+    }
+  }
+
+  throw lastError;
+}
+
 /* ──────────────────────────────── OAuth ──────────────────────────────────── */
 
 /**
@@ -452,7 +517,33 @@ export async function fetchProfile(accessToken, igUserId) {
     'account_type', 'biography', 'website',
   ];
 
-  const p = await igGetFields(String(igUserId), FIELDS, accessToken, 'profile fetch');
+  /**
+   * Which node to read the profile from.
+   *
+   * This used `String(igUserId)` alone — the `user_id` handed back by the token
+   * exchange — and that is what production is failing on:
+   *
+   *   GET https://graph.instagram.com/{user_id}?fields=…
+   *   {"error":{"message":"Unsupported request - method type: get",
+   *             "type":"IGApiException","code":100}}
+   *
+   * That message is the host saying the *path* is not a routable node — the
+   * same class of failure as the `/v22.0/` prefix before it, and distinct from
+   * a bad field ("Tried accessing nonexisting field") or a bad object
+   * ("Object with ID … does not exist"). Under Instagram Login the token
+   * response's `user_id` is an app-scoped identifier; it identifies the account
+   * but is not addressable as a Graph node.
+   *
+   * `me` is. An Instagram User access token *is* the identity, so the node
+   * needs no id at all, and the response carries `id` and `user_id` anyway.
+   *
+   * Note this does not add a request: the profile fetch is one call either way,
+   * and it is the same call that was already being made — only the node
+   * changes. The id from the token is still used, as the second candidate and
+   * as the value persisted, so nothing is lost if `me` is ever refused.
+   */
+  const nodes = ['me', igUserId ? String(igUserId) : null].filter(Boolean);
+  const p = await igGetFieldsFromNodes(nodes, FIELDS, accessToken, 'profile fetch');
 
   return {
     id: String(p.user_id ?? p.id ?? igUserId),

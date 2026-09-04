@@ -385,11 +385,17 @@ async function runCallback({ handler, expectMeCall }) {
         // catchAsync does not return the promise; give the handler a tick to settle.
         for (let i = 0; i < 50 && !redirectedTo; i += 1) await new Promise((r) => setImmediate(r));
 
-        const meCalled = calls.some((c) => c.url.pathname.endsWith('/me'));
+        // Every graph read that was not the token exchange or the long-lived
+        // upgrade — i.e. the profile reads, in the order they were attempted.
+        const graphReads = calls
+            .filter((c) => c.url.host === 'graph.instagram.com' && c.url.pathname !== '/access_token')
+            .map((c) => c.url.pathname);
+
+        const meCalled = graphReads.some((p) => p.endsWith('/me'));
         if (expectMeCall !== undefined) {
             assert.equal(meCalled, expectMeCall, `expected /me call: ${expectMeCall}`);
         }
-        return { redirect: new URL(redirectedTo), saved, meCalled };
+        return { redirect: new URL(redirectedTo), saved, meCalled, graphReads };
     } finally {
         InstagramAccount.findOne = original.findOne;
         InstagramAccount.findOneAndUpdate = original.findOneAndUpdate;
@@ -409,11 +415,22 @@ const profileJson = (over = {}) => ({
     ...over,
 });
 
-test('the callback does not call /me when the token exchange already returned the id', async () => {
-    // The heart of the outage: a network round-trip to re-fetch a value we had
-    // just been handed meant one broken endpoint failed the whole connection.
-    const { redirect, saved } = await runCallback({
-        expectMeCall: false,
+test('the profile is read from the `me` node, in a single request', async () => {
+    /**
+     * The production failure this replaces:
+     *
+     *   GET https://graph.instagram.com/{token.user_id}?fields=…
+     *   {"error":{"message":"Unsupported request - method type: get",
+     *             "type":"IGApiException","code":100}}
+     *
+     * Under Instagram Login the token response's `user_id` identifies the
+     * account but is not addressable as a Graph node. `me` is — the access
+     * token is itself the identity — and the response carries the id anyway.
+     *
+     * The count matters as much as the node: this must remain ONE graph read,
+     * not a `/me` lookup followed by a profile fetch.
+     */
+    const { redirect, saved, graphReads } = await runCallback({
         handler: (url) => {
             if (url.host === 'api.instagram.com') return { json: { data: [{ access_token: 'SHORT', user_id: 17841400000000000 }] } };
             if (url.pathname === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
@@ -421,24 +438,60 @@ test('the callback does not call /me when the token exchange already returned th
         },
     });
 
+    assert.deepEqual(graphReads, ['/me'], 'exactly one profile read, against the me node');
     assert.equal(redirect.searchParams.get('ig'), 'connected');
     assert.equal(saved.doc.igUserId, '17841400000000000');
     assert.equal(saved.doc.accountType, 'CREATOR');
     assert.equal(saved.doc.status, 'connected');
 });
 
-test('the callback falls back to /me when the token response omits the id', async () => {
-    const { saved } = await runCallback({
-        expectMeCall: true,
+test('the exact production rejection on `me` falls back to the id node', async () => {
+    // If a future app configuration refuses `me`, the id from the token is
+    // still there to address the node with — the connection degrades to the old
+    // behaviour rather than failing.
+    const { redirect, saved, graphReads } = await runCallback({
         handler: (url) => {
-            if (url.host === 'api.instagram.com') return { json: { data: [{ access_token: 'SHORT' }] } };
+            if (url.host === 'api.instagram.com') return { json: { data: [{ access_token: 'SHORT', user_id: 178414 }] } };
             if (url.pathname === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
-            if (url.pathname === '/me') return { json: { user_id: '178414', username: 'creator' } };
+            if (url.pathname === '/me') {
+                return { status: 400, json: { error: { message: 'Unsupported request - method type: get', type: 'IGApiException', code: 100 } } };
+            }
             return { json: profileJson({ user_id: '178414' }) };
         },
     });
 
+    assert.deepEqual(graphReads, ['/me', '/178414'], 'it must try me, then the id');
+    assert.equal(redirect.searchParams.get('ig'), 'connected');
     assert.equal(saved.doc.igUserId, '178414');
+});
+
+test('a token response with no user_id still connects, using `me` alone', async () => {
+    const { redirect, saved, graphReads } = await runCallback({
+        handler: (url) => {
+            if (url.host === 'api.instagram.com') return { json: { data: [{ access_token: 'SHORT' }] } };
+            if (url.pathname === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
+            return { json: profileJson({ user_id: '178414' }) };
+        },
+    });
+
+    assert.deepEqual(graphReads, ['/me'], 'with no id there is only one node to try');
+    assert.equal(redirect.searchParams.get('ig'), 'connected');
+    assert.equal(saved.doc.igUserId, '178414', 'the id comes back inside the profile');
+});
+
+test('the id node is never used as the only candidate', async () => {
+    // The regression guard: whatever else changes, a profile read must never go
+    // straight to /{user_id} again, because that is the request Instagram
+    // refuses with "Unsupported request - method type: get".
+    const { graphReads } = await runCallback({
+        handler: (url) => {
+            if (url.host === 'api.instagram.com') return { json: { data: [{ access_token: 'SHORT', user_id: 178414 }] } };
+            if (url.pathname === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
+            return { json: profileJson({ user_id: '178414' }) };
+        },
+    });
+
+    assert.equal(graphReads[0], '/me', 'the first profile read must be the me node');
 });
 
 test('the callback survives the production failure end to end instead of 500ing', async () => {

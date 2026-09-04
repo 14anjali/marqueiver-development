@@ -229,13 +229,22 @@ export const instagramCallback = catchAsync(async (req, res) => {
      * now only the fallback for the older token shape that omits `user_id`, and
      * the log above says which path this run took.
      */
-    let igUserId = token.user_id;
-    if (!igUserId) {
-      const me = await step('fetchMe', () => instagramService.fetchMe(token.access_token));
-      igUserId = me.id;
-    }
+    const igUserId = token.user_id;
 
-    // Step 6 — full profile, which is what eligibility is judged on.
+    /**
+     * Step 6 — the profile, which is what eligibility is judged on, and which
+     * also carries the authoritative account id.
+     *
+     * There is no separate `/me` round-trip any more, in either direction.
+     * `fetchProfile` asks the `me` node first — an Instagram User access token
+     * *is* the identity, so the node needs no id — and falls back to the
+     * id-addressed node only if the host refuses that path. One request, and
+     * the id comes back inside it.
+     *
+     * The id from the token is still what gets stored; it is passed here purely
+     * as the fallback node and as the value to fall back to if the response
+     * omits one.
+     */
     const profile = await step('fetchProfile', () =>
       instagramService.fetchProfile(token.access_token, igUserId));
 
