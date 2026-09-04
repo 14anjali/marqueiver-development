@@ -21,7 +21,10 @@ export function buildAuthUrl(state) {
     state,
     response_type: 'code',
 
-   scope: ['email', 'public_profile'].join(','),
+    scope: [
+      'public_profile',
+      'email'
+    ].join(','),
   });
 
   return `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth?${params}`;
