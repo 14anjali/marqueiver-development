@@ -1,6 +1,6 @@
 import { connectDb, disconnectDb } from '../config/db.js';
 import { User, CreatorProfile, BrandProfile, Deal, Campaign, } from '../models/index.js';
-import { fetchSocialStats } from '../services/meta.service.js';
+import { syntheticSocialStats } from '../services/meta.service.js';
 import { logger } from '../config/logger.js';
 /**
  * Sample data mirroring the frontend screens (Damyanti Verma, Rohit Sharma, Nike…).
@@ -37,7 +37,20 @@ async function seed() {
         i += 1;
         const phone = `+9190000001${String(i).padStart(2, '0')}`;
         const user = await User.create({ phone, role: 'creator', phoneVerified: true, onboardingComplete: true });
-        const socials = await Promise.all(c.socials.map((p) => fetchSocialStats(p, c.name.replace(/\s/g, '').toLowerCase())));
+        /**
+         * Synthetic by definition, and asked for explicitly.
+         *
+         * This called `fetchSocialStats`, which consults `env.integrationMode`
+         * — so seeding demo data took a different path in production than in
+         * development, and that difference is what crashed Render at boot.
+         *
+         * There was never anything to look up: these six creators are fictional.
+         * No Instagram account exists for "damyantiverma", so a live Graph call
+         * for that handle could only fail or return nothing. Demo fixtures must
+         * not depend on provider configuration, must not reach the network
+         * during boot, and must not be able to stop the server from starting.
+         */
+        const socials = c.socials.map((p) => syntheticSocialStats(p, c.name.replace(/\s/g, '').toLowerCase()));
         await CreatorProfile.create({
             user: user._id, displayName: c.name, headline: c.headline,
             bio: `${c.headline}. I create content around ${c.cats.join(', ').toLowerCase()}.`,

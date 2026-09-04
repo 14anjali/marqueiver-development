@@ -147,9 +147,47 @@ resendApiKey: process.env.RESEND_API_KEY ?? '',
     graphVersion: process.env.FACEBOOK_GRAPH_VERSION ?? 'v23.0',
     redirectUri: process.env.FACEBOOK_REDIRECT_URI ?? '',
   },
+
+  /**
+   * Meta Graph credentials for `meta.service.js` (`fetchSocialStats`).
+   *
+   * This block did not exist, and `meta.service.js` line 9 read
+   * `env.meta.appId` regardless — which is the Render boot crash:
+   *
+   *   if (env.integrationMode === 'mock' || !env.meta.appId)
+   *
+   * `||` short-circuits, so with INTEGRATION_MODE unset (it defaults to 'mock')
+   * the left side is true and the right side is never evaluated. Every local run
+   * and every test therefore passed over a line that could not work. Render sets
+   * INTEGRATION_MODE=live, the left side became false, and reading `.appId` off
+   * `undefined` threw before the HTTP server was ever created.
+   *
+   * No new Render variable is introduced here: `fetchSocialStats` talks to the
+   * Meta Graph API, and the Meta app credentials this project already
+   * configures are the Facebook ones. Deriving the value keeps one source of
+   * truth rather than adding a second pair that could drift out of step with it.
+   */
+  get meta() {
+    return { appId: this.facebook.appId, appSecret: this.facebook.appSecret };
+  },
     instagram: {
         appId: process.env.INSTAGRAM_APP_ID ?? '',
   appSecret: process.env.INSTAGRAM_APP_SECRET ?? '',
+        /**
+         * Version prefix for graph.instagram.com, e.g. 'v23.0'.
+         *
+         * Empty by default, and that is a decision rather than an omission: the
+         * Instagram-Login endpoints are documented unversioned
+         * (`https://graph.instagram.com/me`), and a version segment the host
+         * does not recognise is read as a *node id* — which is exactly what
+         * produced `IGApiException code 100 "Unsupported request - method
+         * type: get"` in production against `/v22.0/me`.
+         *
+         * Set this only to pin a version you have confirmed works. The client
+         * falls back to the unversioned path either way and logs when it had
+         * to, so a wrong value degrades to a warning instead of an outage.
+         */
+        graphVersion: (process.env.INSTAGRAM_GRAPH_VERSION ?? '').trim().replace(/^\/+|\/+$/g, ''),
         redirectUri: process.env.INSTAGRAM_REDIRECT_URI
             ?? `${process.env.API_URL ?? 'http://localhost:4000'}/api/auth/instagram/callback`,
     },
