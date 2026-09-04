@@ -14,20 +14,34 @@ export function newState() {
 /**
  * Build Facebook OAuth URL with EXACT permissions available on Dashboard
  */
-export function buildAuthUrl(state) {
-  const params = new URLSearchParams({
-    client_id: env.facebook.appId,
-    redirect_uri: env.facebook.redirectUri,
-    state,
-    response_type: 'code',
+export async function fetchUserProfile(userAccessToken) {
+  const fields = [
+    'id',
+    'name',
+    'email',
+    'picture.type(large)',
+  ].join(',');
 
-    scope: [
-      'public_profile',
-      'email'
-    ].join(','),
+  const params = new URLSearchParams({
+    fields,
+    access_token: userAccessToken,
   });
 
-  return `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth?${params}`;
+  const response = await fetch(`${GRAPH_URL}/me?${params}`);
+  const data = await response.json();
+
+  if (!response.ok || data.error) {
+    throw new Error(
+      data.error?.message || 'Unable to fetch Facebook User Profile'
+    );
+  }
+
+  return {
+    id: data.id,
+    name: data.name,
+    email: data.email,
+    profilePicture: data.picture?.data?.url || null,
+  };
 }
 
 /**
