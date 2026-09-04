@@ -2,6 +2,7 @@ import { catchAsync, ApiError } from '../../utils/apiError.js';
 import { assertNotLinkedElsewhere, assertInstagramEligible } from '../../services/socialConnect.service.js';
 import { ok } from '../../utils/respond.js';
 import { env } from '../../config/env.js';
+import { logger } from '../../config/logger.js';
 import { verifyAccess } from '../../utils/tokens.js';
 import { InstagramAccount, CreatorProfile, User } from '../../models/index.js';
 import * as instagramService from '../../services/instagram.service.js';
@@ -33,7 +34,7 @@ async function persistProfile(userId, token, profile) {
    *
    * Then uniqueness: one Instagram account belongs to one Marqueiver user.
    */
-  assertInstagramEligible(profile);
+  const accountType = assertInstagramEligible(profile, { businessLogin: true });
   await assertNotLinkedElsewhere('instagram', profile.id, userId);
 
   const doc = {
@@ -56,7 +57,19 @@ async function persistProfile(userId, token, profile) {
     followers: profile.followers_count ?? 0,
     following: profile.follows_count ?? 0,
     mediaCount: profile.media_count ?? 0,
-    accountType: profile.account_type || 'BUSINESS',
+    /**
+     * The type the eligibility gate resolved, not a default.
+     *
+     * This read `profile.account_type || 'BUSINESS'`, which quietly undid the
+     * fix one line above it: `fetchProfile` was changed to leave the field
+     * undefined when Instagram does not return it, precisely so that nothing
+     * downstream would invent one — and then this recorded every such account as
+     * BUSINESS anyway. The stored value is now whatever
+     * `assertInstagramEligible` actually concluded ('UNKNOWN' when Business
+     * Login is the evidence rather than a reported type), so the database says
+     * what we know instead of what we assumed.
+     */
+    accountType,
     isVerified: profile.is_verified || false,
     website: profile.website,
     dataSource: 'connected',
@@ -130,19 +143,58 @@ export const instagramCallback = catchAsync(async (req, res) => {
   let claims;
   try { claims = verifyAccess(jwt); } catch { throw ApiError.unauthorized('Invalid OAuth state'); }
 
-  // Step 1: Exchange code for token
-  const token = await instagramService.exchangeCodeForToken(String(code));
+  /**
+   * Everything past this point can fail for reasons the person needs to read —
+   * an ineligible account, a revoked token, Instagram being down. This is a
+   * browser redirect from Instagram, not an API call, so letting an ApiError
+   * escape rendered a raw JSON error page at the callback URL: the person was
+   * dropped out of onboarding onto `{"ok":false,...}` with no way back. The
+   * failure is now carried into the UI on the same redirect the success path
+   * uses, so onboarding stays in control of what happens next.
+   */
+  try {
+    // Step 1 — exchange the code. This already returns the Instagram user id.
+    const token = await instagramService.exchangeCodeForToken(String(code));
 
-  // Step 2: Get IG User ID from /me endpoint
-  const meData = await instagramService.fetchMe(token.access_token);
+    /**
+     * Step 2 — establish the Instagram user id.
+     *
+     * Preferred from the token response, which carries it: the previous code
+     * always spent a `/me` round-trip to re-fetch a value it had just been
+     * handed, so when that one endpoint broke the whole connection failed with
+     * a 500 even though nothing was actually wrong with the account. `/me` is
+     * now only the fallback for the older token shape that omits `user_id`.
+     */
+    let igUserId = token.user_id;
+    if (!igUserId) {
+      const me = await instagramService.fetchMe(token.access_token);
+      igUserId = me.id;
+    }
 
-  // Step 3: Fetch full profile using IG User ID
-  const profile = await instagramService.fetchProfile(token.access_token, meData.id);
+    // Step 3 — full profile, which is what eligibility is judged on.
+    const profile = await instagramService.fetchProfile(token.access_token, igUserId);
 
-  // Step 4: Persist profile
-  await persistProfile(claims.sub, token, profile);
+    // Step 4 — persist (eligibility + uniqueness gates live in persistProfile).
+    await persistProfile(claims.sub, token, { ...profile, id: profile.id ?? igUserId });
 
-  return redirectResult(res, true, 'Instagram connected');
+    return redirectResult(res, true, 'Instagram connected');
+  } catch (err) {
+    /**
+     * Meaningful failures carry their own message — "must be a Creator or
+     * Business account", "authorization expired". Anything without one is a
+     * genuine surprise, and gets a neutral line rather than an internal detail.
+     */
+    const message = err instanceof ApiError
+      ? err.message
+      : 'Instagram connection failed. Please try again.';
+
+    logger.warn('Instagram callback failed', {
+      code: err?.code ?? 'UNKNOWN',
+      providerCode: err?.details?.providerCode ?? null,
+    });
+
+    return redirectResult(res, false, message);
+  }
 });
 
 /** FR-5 — return the connected profile (token never included). */
