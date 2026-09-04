@@ -1,0 +1,11 @@
+import { Router } from 'express';
+import { authenticate } from '../../middleware/auth.js';
+import { validate } from '../../middleware/validate.js';
+import * as c from './messaging.controller.js';
+const router = Router();
+router.use(authenticate);
+router.get('/threads', c.listThreads);
+router.get('/:dealId', c.listMessages);
+router.post('/:dealId', validate(c.sendSchema), c.sendMessage);
+router.post('/:dealId/read', c.markRead);
+export default router;

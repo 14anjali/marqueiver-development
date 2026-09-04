@@ -1,0 +1,504 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light; }
+* { -webkit-font-smoothing: antialiased; }
+
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  color: #1B1130;
+  background: #fff;
+}
+
+/* Money is set with tabular figures everywhere, so amounts in a list or an
+   offer history line up column-wise and can be compared at a glance. */
+.tnum { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1; }
+
+/* Thin scrollbars for horizontal rails. */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+@layer components {
+  /* ── Surfaces ──────────────────────────────────────────────────────────
+     Three deliberate tiers rather than one card style used for everything:
+     .panel is a flat container, .card is a raised object, .card-lifted is the
+     one thing on a page that should feel picked up. */
+  .panel       { @apply bg-white rounded-xl2 border border-line; }
+  .card        { @apply bg-white rounded-xl2 border border-line shadow-card; }
+  .card-lifted { @apply bg-white rounded-xl3 border border-line shadow-lifted; }
+  .wash        { @apply bg-lilac rounded-xl2 border border-brand-100; }
+
+  /* ── Type ─────────────────────────────────────────────────────────────── */
+  .h-display { @apply font-display font-extrabold text-ink; }
+  .lede      { @apply text-lg text-ink-soft leading-relaxed max-w-prose; }
+  /* Amounts carry the display face because money is the content here. */
+  .money     { @apply font-display font-extrabold tnum text-ink; }
+  .money-lg  { @apply money text-display-sm; }
+
+  /* ── Controls ─────────────────────────────────────────────────────────── */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg font-semibold text-sm px-4 py-2.5
+           transition-colors duration-150
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-cta     { @apply btn text-white bg-cta-grad hover:opacity-95 shadow-flat; }
+  .btn-brand   { @apply btn text-white bg-brand-600 hover:bg-brand-700; }
+  .btn-outline { @apply btn border border-brand-300 text-brand-700 hover:bg-brand-50; }
+  .btn-ghost   { @apply btn border border-line text-ink hover:bg-bg; }
+  /* Money-moving actions are ochre, so funding escrow never looks like an
+     ordinary submit button. */
+  .btn-money   { @apply btn text-ink bg-money-500 hover:bg-money-600 hover:text-white; }
+
+  .field {
+    @apply w-full bg-white border border-line rounded-lg px-3 py-2.5 text-sm text-ink
+           placeholder:text-muted/70
+           focus:outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100 transition;
+  }
+  .field-label { @apply block text-sm font-medium text-ink mb-1.5; }
+
+  /* ── Status ───────────────────────────────────────────────────────────── */
+  .pill       { @apply inline-flex items-center gap-1 rounded-full text-xs font-medium px-2.5 py-1; }
+  .pill-money { @apply pill bg-money-50 text-money-700 border border-money-100; }
+  .pill-live  { @apply pill bg-brand-50 text-brand-700; }
+  .pill-done  { @apply pill bg-jade-50 text-jade-700; }
+  .pill-quiet { @apply pill bg-bg text-muted border border-line; }
+  .chip       { @apply inline-flex items-center gap-1 rounded-full bg-brand-50 text-brand-700 text-xs font-medium px-2.5 py-1; }
+  .stat-num   { @apply font-display font-extrabold text-ink tnum; }
+
+  /* Section rhythm — defined once so sections can't fight each other's
+     padding as they get edited. */
+  .section    { @apply py-20 md:py-28; }
+  .container-page { @apply max-w-6xl mx-auto px-5; }
+}
+
+@keyframes fadein { from { opacity: 0 } to { opacity: 1 } }
+/* Sheets rise on mobile and settle on desktop — the motion says "this is a
+   layer above", which matters for an irreversible action. */
+@keyframes sheetin {
+  from { transform: translateY(16px) scale(.99); opacity: 0 }
+  to   { transform: translateY(0) scale(1); opacity: 1 }
+}
+@keyframes slidein { from { transform: translateX(20px); opacity: 0 } to { transform: translateX(0); opacity: 1 } }
+
+/* Motion is opt-out. The load sequence and all transitions collapse to
+   nothing for anyone who has asked for reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   AUTHENTICATION SURFACE
+
+   The signup and login screens are the first thing anyone sees, and the old
+   ones were a bordered white box on a grey page. This is a separate visual
+   register: a deep aubergine field with slow-moving colour behind it, and glass
+   panels floating on top.
+
+   Two constraints shape every rule below.
+
+   1. **The motion has to be ignorable.** Nobody comes to a login screen to
+      watch it. The ambient drift is 20–28s per cycle and low-contrast, so it
+      reads as depth rather than as animation. Everything else is a 150–400ms
+      transition tied to something the user did. All of it collapses under
+      prefers-reduced-motion, which is honoured globally further up this file.
+
+   2. **Glass must not cost legibility.** Every translucent surface has an
+      opaque colour underneath it, so a browser without backdrop-filter (or a
+      user with it disabled) gets a solid panel rather than grey text on a
+      gradient. Text contrast is checked against the *fallback*, not the blur.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@layer components {
+
+  /* ── The field ─────────────────────────────────────────────────────────── */
+  .auth-stage {
+    @apply relative min-h-screen overflow-hidden isolate;
+    background:
+      radial-gradient(120% 90% at 12% 8%,  #4C1D95 0%, transparent 55%),
+      radial-gradient(110% 80% at 92% 12%, #7C3AED 0%, transparent 50%),
+      radial-gradient(120% 90% at 78% 96%, #DB2777 0%, transparent 48%),
+      linear-gradient(160deg, #150C26 0%, #241243 48%, #150C26 100%);
+  }
+
+  /* Two slow, offset colour fields. Blur is what stops them reading as shapes. */
+  .auth-orb {
+    @apply pointer-events-none absolute rounded-full opacity-[0.30] mix-blend-screen;
+    filter: blur(72px);
+    animation: orbdrift 24s ease-in-out infinite alternate;
+    will-change: transform;
+  }
+  .auth-orb--two { animation-duration: 31s; animation-delay: -9s; }
+
+  /* Fine grid, barely there. It gives the depth a reference plane, which is
+     what keeps the gradient from looking like a smear. */
+  .auth-grid {
+    @apply pointer-events-none absolute inset-0 opacity-[0.05];
+    background-image:
+      linear-gradient(rgba(255,255,255,.6) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.6) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(80% 60% at 50% 40%, #000 20%, transparent 100%);
+  }
+
+  /* ── Glass ─────────────────────────────────────────────────────────────── */
+  .glass {
+    background: rgba(255,255,255,0.94);          /* the fallback, and the floor */
+    @apply rounded-xl3 border border-white/60 shadow-lifted;
+  }
+  @supports (backdrop-filter: blur(1px)) {
+    .glass { background: rgba(255,255,255,0.82); backdrop-filter: blur(22px) saturate(160%); }
+  }
+
+  /* Dark glass, for panels sitting on the light side of a split layout. */
+  .glass-dark {
+    background: rgba(27,17,48,0.62);
+    @apply rounded-xl2 border border-white/10;
+  }
+  @supports (backdrop-filter: blur(1px)) {
+    .glass-dark { background: rgba(27,17,48,0.42); backdrop-filter: blur(16px); }
+  }
+
+  /* The card itself. The top highlight is a single hairline — it reads as a
+     lit edge and does most of the work of making the panel feel like an
+     object rather than a rectangle. */
+  .auth-card {
+    @apply glass relative p-6 sm:p-8;
+  }
+  .auth-card::before {
+    content: '';
+    @apply absolute inset-x-6 top-0 h-px rounded-full;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.9), transparent);
+  }
+
+  /* ── Choice tiles (role, method) ───────────────────────────────────────── */
+  .auth-tile {
+    @apply relative w-full text-left rounded-xl2 border border-line bg-white p-4 sm:p-5
+           transition-all duration-200 ease-out
+           hover:border-brand-300 hover:shadow-raised hover:-translate-y-0.5
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2
+           active:translate-y-0 active:shadow-flat;
+  }
+  .auth-tile[aria-pressed='true'],
+  .auth-tile[data-selected='true'] {
+    @apply border-brand-500 bg-brand-50/70 shadow-raised;
+  }
+
+  /* ── Inputs ────────────────────────────────────────────────────────────── */
+  .auth-field {
+    @apply w-full bg-white border border-line rounded-xl2 px-4 py-3 text-[15px] text-ink
+           placeholder:text-muted/60
+           focus:outline-none focus:border-brand-400 focus:ring-4 focus:ring-brand-100
+           transition duration-150;
+  }
+  .auth-field[aria-invalid='true'] {
+    @apply border-rose-400 focus:border-rose-500 focus:ring-rose-100;
+  }
+  .auth-field-wrap { @apply relative; }
+  /* Leading icon slot. */
+  .auth-field--icon { @apply pl-11; }
+  .auth-field-icon  { @apply absolute left-4 top-1/2 -translate-y-1/2 text-muted pointer-events-none; }
+
+  /* ── OTP boxes ─────────────────────────────────────────────────────────── */
+  .otp-box {
+    @apply w-11 h-14 sm:w-12 sm:h-16 rounded-xl2 border border-line bg-white
+           text-center text-2xl font-display font-extrabold text-ink tnum
+           transition-all duration-150
+           focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-100;
+  }
+  .otp-box[data-filled='true'] { @apply border-brand-300 bg-brand-50/60; }
+  .otp-box[data-state='error'] { @apply border-rose-400 bg-rose-50; }
+  .otp-box[data-state='ok']    { @apply border-jade-500 bg-jade-50; }
+
+  /* ── Buttons ───────────────────────────────────────────────────────────── */
+  .auth-btn {
+    @apply relative w-full inline-flex items-center justify-center gap-2.5
+           rounded-xl2 font-semibold text-[15px] px-5 py-3.5 overflow-hidden
+           transition-all duration-200
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2
+           disabled:opacity-45 disabled:cursor-not-allowed disabled:shadow-none;
+  }
+  .auth-btn-primary {
+    @apply auth-btn text-white shadow-raised
+           hover:shadow-lifted hover:-translate-y-px active:translate-y-0;
+    background: linear-gradient(100deg, #7C3AED 0%, #A855F7 45%, #EC4899 100%);
+    background-size: 200% 100%;
+  }
+  .auth-btn-primary:hover:not(:disabled) { background-position: 100% 0; }
+  .auth-btn-secondary {
+    @apply auth-btn bg-white text-ink border border-line
+           hover:border-brand-300 hover:shadow-raised hover:-translate-y-px active:translate-y-0;
+  }
+  /* WhatsApp keeps its own green so the channel is recognisable at a glance —
+     it is the one place brand colour would actively mislead. */
+  .auth-btn-whatsapp {
+    @apply auth-btn bg-white text-ink border border-line
+           hover:border-[#25D366] hover:shadow-raised hover:-translate-y-px active:translate-y-0;
+  }
+  .auth-btn-ghost {
+    @apply inline-flex items-center gap-1.5 text-sm font-medium text-muted
+           hover:text-ink transition-colors rounded-lg
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500;
+  }
+
+  /* ── Progress ──────────────────────────────────────────────────────────── */
+  .auth-steps { @apply flex items-center gap-1.5; }
+  .auth-step  { @apply h-1 rounded-full transition-all duration-500 ease-out; }
+  .auth-step--done    { @apply bg-brand-500 w-6; }
+  .auth-step--current { @apply w-10; background: linear-gradient(90deg,#7C3AED,#EC4899); }
+  .auth-step--todo    { @apply bg-line w-6; }
+
+  /* ── Inline messages ───────────────────────────────────────────────────── */
+  .auth-error {
+    @apply flex items-start gap-2.5 rounded-xl2 border border-rose-200 bg-rose-50
+           px-3.5 py-3 text-sm text-rose-700;
+  }
+  .auth-note {
+    @apply flex items-start gap-2.5 rounded-xl2 border border-brand-100 bg-brand-50
+           px-3.5 py-3 text-sm text-brand-800;
+  }
+  .auth-success {
+    @apply flex items-start gap-2.5 rounded-xl2 border border-jade-100 bg-jade-50
+           px-3.5 py-3 text-sm text-jade-700;
+  }
+  .field-error { @apply mt-1.5 text-xs text-rose-600; }
+
+  /* ── Policy pages ──────────────────────────────────────────────────────── */
+  .policy-body { @apply text-[15px] leading-[1.75] text-ink-soft; }
+  .policy-body p { @apply mb-4; }
+  .policy-body ul { @apply mb-4 space-y-2 list-none pl-0; }
+  .policy-body li { @apply relative pl-5; }
+  .policy-body li::before {
+    content: '';
+    @apply absolute left-0 top-[0.65em] w-1.5 h-1.5 rounded-full bg-brand-300;
+  }
+  .policy-table { @apply w-full text-sm border-collapse; }
+  .policy-table th {
+    @apply text-left font-semibold text-ink bg-bg border-b border-line px-3 py-2.5 align-bottom;
+  }
+  .policy-table td { @apply border-b border-line px-3 py-2.5 text-ink-soft align-top; }
+  .policy-table tr:last-child td { @apply border-b-0; }
+}
+
+/* Ambient drift. Deliberately small — a large translation reads as animation,
+   a small one reads as depth. */
+@keyframes orbdrift {
+  from { transform: translate3d(0,0,0) scale(1); }
+  to   { transform: translate3d(4%, -6%, 0) scale(1.12); }
+}
+
+/* Step transitions. Direction-aware so going back feels like going back. */
+@keyframes stepin      { from { opacity:0; transform: translateX(16px) } to { opacity:1; transform:none } }
+@keyframes stepinback  { from { opacity:0; transform: translateX(-16px) } to { opacity:1; transform:none } }
+@keyframes riseinsoft  { from { opacity:0; transform: translateY(10px) }  to { opacity:1; transform:none } }
+@keyframes shake       { 10%,90%{transform:translateX(-2px)} 30%,70%{transform:translateX(4px)} 50%{transform:translateX(-4px)} }
+@keyframes sheen       { from { background-position: -180% 0 } to { background-position: 280% 0 } }
+
+.anim-step      { animation: stepin      .34s cubic-bezier(.22,.7,.3,1) both; }
+.anim-step-back { animation: stepinback  .34s cubic-bezier(.22,.7,.3,1) both; }
+.anim-rise      { animation: riseinsoft  .42s cubic-bezier(.22,.7,.3,1) both; }
+.anim-shake     { animation: shake .4s ease; }
+
+/* Stagger for lists that appear together — 45ms is enough to read as a
+   sequence without making anyone wait for the last item. */
+.stagger > *          { animation: riseinsoft .4s cubic-bezier(.22,.7,.3,1) both; }
+.stagger > *:nth-child(1) { animation-delay: .02s }
+.stagger > *:nth-child(2) { animation-delay: .07s }
+.stagger > *:nth-child(3) { animation-delay: .12s }
+.stagger > *:nth-child(4) { animation-delay: .17s }
+.stagger > *:nth-child(5) { animation-delay: .22s }
+.stagger > *:nth-child(6) { animation-delay: .27s }
+
+/* Skeleton shimmer for the policy pages, which load real text over the wire. */
+.shimmer {
+  background: linear-gradient(90deg, #EFEBF7 25%, #F7F5FC 37%, #EFEBF7 63%);
+  background-size: 400% 100%;
+  animation: sheen 1.4s linear infinite;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LIQUID SURFACE SYSTEM — the public site
+
+   A "liquid" look fails in two predictable ways: everything becomes glass until
+   nothing reads as foreground, or the blur is so heavy the page stops being
+   legible and starts costing frames. Both are avoided by rule here.
+
+   1. **Glass is a layer, not a texture.** Three tiers only — `liquid-pane` for
+      floating product cards, `liquid-tile` for content surfaces, `liquid-chip`
+      for small labels. Body copy sits on solid ground. If everything floats,
+      nothing does.
+   2. **Every translucent surface has an opaque colour underneath.** Browsers
+      without `backdrop-filter`, and users who disable it, get a solid panel
+      rather than grey text over a gradient. Contrast is checked against the
+      fallback.
+   3. **Blur radius stays ≤ 28px and the count of blurred layers stays low.**
+      Backdrop blur is the single most expensive thing on this page; a large
+      radius over a large area is what drops a scroll to 30fps on a mid-range
+      phone.
+   4. **Only `transform` and `opacity` animate.** Nothing here animates a
+      property that triggers layout or paint.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@layer components {
+
+  /* ── The ground ────────────────────────────────────────────────────────── */
+  .liquid-stage {
+    @apply relative isolate overflow-hidden;
+    background:
+      radial-gradient(100% 70% at 6% -5%,  rgba(124,58,237,.16) 0%, transparent 60%),
+      radial-gradient(80% 60% at 100% 0%,  rgba(236,72,153,.13) 0%, transparent 55%),
+      radial-gradient(90% 70% at 50% 108%, rgba(232,163,61,.10) 0%, transparent 60%),
+      #FFFFFF;
+  }
+  .liquid-stage--ink {
+    background:
+      radial-gradient(90%  70% at 10% 0%,   rgba(168,85,247,.30) 0%, transparent 60%),
+      radial-gradient(80%  60% at 95% 10%,  rgba(236,72,153,.22) 0%, transparent 55%),
+      radial-gradient(100% 80% at 50% 110%, rgba(232,163,61,.16) 0%, transparent 60%),
+      linear-gradient(168deg, #150C26 0%, #241243 55%, #150C26 100%);
+  }
+
+  /* A single wide light sweep. One element, transform-only, cheap. */
+  .liquid-sheen {
+    @apply pointer-events-none absolute inset-x-0 -top-1/3 h-2/3 opacity-60;
+    background: radial-gradient(60% 50% at 50% 50%, rgba(255,255,255,.75) 0%, transparent 70%);
+    filter: blur(40px);
+  }
+
+  /* ── Surfaces ──────────────────────────────────────────────────────────── */
+  .liquid-pane {
+    background: rgba(255,255,255,.90);
+    @apply rounded-xl3 border border-white/70 shadow-lifted;
+  }
+  .liquid-tile {
+    background: rgba(255,255,255,.72);
+    @apply rounded-xl2 border border-line shadow-card;
+  }
+  .liquid-chip {
+    background: rgba(255,255,255,.70);
+    @apply rounded-full border border-white/60 shadow-flat;
+  }
+  @supports (backdrop-filter: blur(1px)) {
+    .liquid-pane { background: rgba(255,255,255,.66); backdrop-filter: blur(26px) saturate(180%); }
+    .liquid-tile { background: rgba(255,255,255,.55); backdrop-filter: blur(16px) saturate(150%); }
+    .liquid-chip { background: rgba(255,255,255,.55); backdrop-filter: blur(12px) saturate(150%); }
+  }
+
+  /* Dark-ground equivalents. */
+  .liquid-pane-ink { background: rgba(27,17,48,.72); @apply rounded-xl3 border border-white/12; }
+  .liquid-tile-ink { background: rgba(27,17,48,.55); @apply rounded-xl2 border border-white/10; }
+  @supports (backdrop-filter: blur(1px)) {
+    .liquid-pane-ink { background: rgba(27,17,48,.46); backdrop-filter: blur(24px) saturate(160%); }
+    .liquid-tile-ink { background: rgba(27,17,48,.34); backdrop-filter: blur(16px); }
+  }
+
+  /* The lit top edge. One hairline does most of the work of making a panel
+     read as a physical object rather than a rectangle. */
+  .liquid-lit { @apply relative; }
+  .liquid-lit::before {
+    content: '';
+    @apply absolute inset-x-5 top-0 h-px rounded-full pointer-events-none;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.95), transparent);
+  }
+  .liquid-lit-ink::before { background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent); }
+
+  /* ── Interactive depth ─────────────────────────────────────────────────── */
+  .liquid-hover {
+    @apply transition-transform duration-300 ease-out will-change-transform;
+  }
+  .liquid-hover:hover { transform: translateY(-4px); }
+
+  .liquid-card {
+    @apply liquid-tile liquid-lit relative overflow-hidden
+           transition-[transform,box-shadow,border-color] duration-300 ease-out;
+  }
+  .liquid-card:hover { @apply shadow-lifted border-brand-200; transform: translateY(-5px); }
+
+  /* Cursor-follow highlight. Driven by two CSS variables the component sets on
+     pointer move, so the effect costs one composited gradient and no re-render. */
+  .liquid-glow::after {
+    content: '';
+    @apply absolute inset-0 opacity-0 transition-opacity duration-300 pointer-events-none;
+    background: radial-gradient(22rem 22rem at var(--mx,50%) var(--my,0%),
+                                rgba(139,92,246,.16), transparent 70%);
+  }
+  .liquid-glow:hover::after { @apply opacity-100; }
+
+  /* ── Typography ────────────────────────────────────────────────────────── */
+  .display-hero {
+    @apply font-display font-extrabold tracking-tight;
+    font-size: clamp(2.5rem, 7.2vw, 5rem);
+    line-height: 1.02;
+    letter-spacing: -0.035em;
+  }
+  .display-section {
+    @apply font-display font-extrabold tracking-tight text-ink;
+    font-size: clamp(1.9rem, 4vw, 3rem);
+    line-height: 1.08;
+    letter-spacing: -0.028em;
+  }
+  .text-flow {
+    background: linear-gradient(100deg, #A855F7 0%, #EC4899 45%, #E8A33D 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .eyebrow {
+    @apply text-xs font-semibold uppercase tracking-[0.18em] text-brand-600;
+  }
+
+  /* ── Buttons ───────────────────────────────────────────────────────────── */
+  .btn-liquid {
+    @apply relative inline-flex items-center justify-center gap-2 rounded-full
+           font-semibold text-[15px] px-7 py-3.5 text-white overflow-hidden
+           transition-[transform,box-shadow] duration-200 shadow-raised
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500
+           focus-visible:ring-offset-2;
+    background: linear-gradient(100deg, #7C3AED 0%, #A855F7 42%, #EC4899 100%);
+    background-size: 200% 100%;
+    background-position: 0 0;
+    transition: background-position .5s ease, transform .2s ease, box-shadow .2s ease;
+  }
+  .btn-liquid:hover { background-position: 100% 0; transform: translateY(-2px); @apply shadow-lifted; }
+  .btn-liquid:active { transform: translateY(0); }
+
+  .btn-liquid-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-full font-semibold text-[15px]
+           px-7 py-3.5 border transition-all duration-200
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500
+           focus-visible:ring-offset-2;
+    @apply border-line text-ink bg-white/70 hover:bg-white hover:border-brand-300 hover:-translate-y-0.5;
+  }
+  .btn-liquid-ghost-ink {
+    @apply border-white/25 text-white bg-white/10 hover:bg-white/20 hover:border-white/40;
+  }
+
+  /* Animated link indicator. `scaleX` only — no layout, no repaint. */
+  .link-slide { @apply relative inline-block; }
+  .link-slide::after {
+    content: '';
+    @apply absolute left-0 -bottom-0.5 h-px w-full origin-right scale-x-0
+           bg-current transition-transform duration-300 ease-out;
+  }
+  .link-slide:hover::after { @apply origin-left scale-x-100; }
+
+  .container-wide { @apply max-w-[76rem] mx-auto px-5 sm:px-8; }
+}
+
+/* Slow ambient drift for the hero light fields. Small translation: large
+   movement reads as animation, small movement reads as depth. */
+@keyframes liquidfloat {
+  0%   { transform: translate3d(0,0,0) scale(1); }
+  50%  { transform: translate3d(2.5%, -3.5%, 0) scale(1.06); }
+  100% { transform: translate3d(-1.5%, 2.5%, 0) scale(1); }
+}
+.animate-liquid { animation: liquidfloat 26s ease-in-out infinite; will-change: transform; }
+.animate-liquid-slow { animation: liquidfloat 38s ease-in-out infinite reverse; will-change: transform; }
+
+/* The global prefers-reduced-motion block earlier in this file already collapses
+   every animation and transition, including all of the above. */
