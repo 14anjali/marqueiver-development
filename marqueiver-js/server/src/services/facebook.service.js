@@ -21,19 +21,7 @@ export function buildAuthUrl(state) {
     state,
     response_type: 'code',
 
-    // ✅ Dashboard par active saari test permissions code me add kar di hain
-    scope: [
-      'public_profile',
-      'email',
-      'user_birthday',
-      'user_age_range',
-      'user_friends',
-      'user_likes',
-      'user_link',
-      'user_location',
-      'user_photos',
-      'user_posts',
-    ].join(','),
+   scope: ['email', 'public_profile'].join(','),
   });
 
   return `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth?${params}`;
