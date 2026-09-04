@@ -12,7 +12,9 @@ export function newState() {
 }
 
 /**
- * Build Facebook OAuth URL with EXACT permissions available on Dashboard
+ * Build Facebook OAuth URL.
+ *
+ * Only request permissions required for basic Facebook Login.
  */
 export function buildAuthUrl(state) {
   const params = new URLSearchParams({
@@ -20,23 +22,10 @@ export function buildAuthUrl(state) {
     redirect_uri: env.facebook.redirectUri,
     state,
     response_type: 'code',
-
-    // ✅ Dashboard par active saari test permissions code me add kar di hain
-    scope: [
-      'public_profile',
-      'email',
-      'user_birthday',
-      'user_age_range',
-      'user_friends',
-      'user_likes',
-      'user_link',
-      'user_location',
-      'user_photos',
-      'user_posts',
-    ].join(','),
+    scope: 'public_profile,email',
   });
 
-  return `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth?${params}`;
+  return `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth?${params.toString()}`;
 }
 
 /**
@@ -50,11 +39,16 @@ export async function exchangeCodeForToken(code) {
     code,
   });
 
-  const response = await fetch(`${GRAPH_URL}/oauth/access_token?${params}`);
+  const response = await fetch(
+    `${GRAPH_URL}/oauth/access_token?${params.toString()}`
+  );
+
   const data = await response.json();
 
   if (!response.ok || data.error) {
-    const message = data.error?.message || 'Unable to exchange Facebook authorization code';
+    const message =
+      data.error?.message ||
+      'Unable to exchange Facebook authorization code';
 
     if (data.error?.code === 100 && /used/i.test(message)) {
       const err = new Error('FB_CODE_ALREADY_USED');
@@ -76,17 +70,14 @@ export async function exchangeCodeForToken(code) {
 }
 
 /**
- * Fetch User Profile (In place of Pages)
+ * Fetch basic Facebook user profile.
  */
 export async function fetchUserProfile(userAccessToken) {
   const fields = [
     'id',
     'name',
     'email',
-    'birthday',
     'picture.type(large)',
-    'link',
-    'location',
   ].join(',');
 
   const params = new URLSearchParams({
@@ -94,25 +85,30 @@ export async function fetchUserProfile(userAccessToken) {
     access_token: userAccessToken,
   });
 
-  const response = await fetch(`${GRAPH_URL}/me?${params}`);
+  const response = await fetch(
+    `${GRAPH_URL}/me?${params.toString()}`
+  );
+
   const data = await response.json();
 
   if (!response.ok || data.error) {
-    throw new Error(data.error?.message || 'Unable to fetch Facebook User Profile');
+    throw new Error(
+      data.error?.message ||
+        'Unable to fetch Facebook User Profile'
+    );
   }
 
   return {
     id: data.id,
     name: data.name,
-    email: data.email,
+    email: data.email || null,
     profilePicture: data.picture?.data?.url || null,
-    birthday: data.birthday,
-    link: data.link,
-    location: data.location?.name,
   };
 }
 
-// Retain fetchManagedPages for backward compatibility if needed
+/**
+ * Retain fetchManagedPages for backward compatibility.
+ */
 export async function fetchManagedPages(userAccessToken) {
   return [];
 }
