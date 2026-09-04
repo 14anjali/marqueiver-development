@@ -1,5 +1,6 @@
 import { ApiError } from '../utils/apiError.js';
 import { InstagramAccount, FacebookPage, YouTubeChannel } from '../models/index.js';
+import { ELIGIBLE_INSTAGRAM_ACCOUNT_TYPES } from '../models/InstagramAccount.js';
 
 /**
  * Rules that must hold before any social account counts as connected.
@@ -64,10 +65,34 @@ export async function assertNotLinkedElsewhere(platform, providerAccountId, user
  * The error carries `switchUrl` so the UI can offer the fix rather than only
  * naming the problem.
  */
-export function assertInstagramEligible(profile) {
-    const type = String(profile?.account_type ?? profile?.accountType ?? 'UNKNOWN').toUpperCase();
+export function assertInstagramEligible(profile, { businessLogin = false } = {}) {
+    const raw = profile?.account_type ?? profile?.accountType;
+    const type = String(raw ?? 'UNKNOWN').toUpperCase();
 
-    if (type === 'CREATOR' || type === 'BUSINESS' || type === 'MEDIA_CREATOR') return type;
+    // The eligible list lives beside the schema enum, because these two silently
+    // drifted apart once: MEDIA_CREATOR was accepted here and missing from the
+    // enum, so the account passed this gate and then failed to save.
+    if (ELIGIBLE_INSTAGRAM_ACCOUNT_TYPES.includes(type)) return type;
+
+    /**
+     * Instagram did not report an account type at all.
+     *
+     * `account_type` is not returned under every configuration of the Instagram
+     * Login API, and the connect flow used to paper over that by defaulting a
+     * missing value to 'BUSINESS' — which meant this gate could never fail: it
+     * was judging a value we had manufactured, not one Instagram sent.
+     *
+     * When the profile came from Business Login, the login *is* the evidence.
+     * The `instagram_business_*` scopes can only be granted by a professional
+     * account; a personal account cannot complete that flow, so holding a token
+     * already proves what this check is asking. Refusing here instead would
+     * reject every eligible creator the moment Meta stopped returning the
+     * field — a far worse failure than trusting the proof we already have.
+     *
+     * An explicit PERSONAL is still refused, and anywhere outside that flow an
+     * unknown type is still refused.
+     */
+    if (!raw && businessLogin) return 'UNKNOWN';
 
     throw new ApiError(422, 'INSTAGRAM_ACCOUNT_TYPE_INELIGIBLE',
         'Your Instagram account must be a Creator or Business account to connect with Marqueiver.',

@@ -280,6 +280,60 @@ test('CREATOR and BUSINESS are accepted', () => {
     assert.equal(assertInstagramEligible({ account_type: 'business' }), 'BUSINESS');
 });
 
+test('every eligible account type can actually be stored', async () => {
+    /**
+     * The production failure:
+     *   WARN Instagram callback failed { code: 'UNKNOWN', providerCode: null }
+     *
+     * `assertInstagramEligible` accepted MEDIA_CREATOR; the InstagramAccount
+     * enum did not list it. So a real MEDIA_CREATOR account passed eligibility
+     * and then died on save with a Mongoose ValidationError — which has no
+     * `code`, hence 'UNKNOWN'. The creator saw "please try again" forever.
+     *
+     * This asserts containment rather than a value, so adding a type to either
+     * list without the other fails here instead of in production.
+     */
+    const { INSTAGRAM_ACCOUNT_TYPES, ELIGIBLE_INSTAGRAM_ACCOUNT_TYPES, InstagramAccount } =
+        await import('../src/models/InstagramAccount.js');
+
+    for (const type of ELIGIBLE_INSTAGRAM_ACCOUNT_TYPES) {
+        assert.ok(INSTAGRAM_ACCOUNT_TYPES.includes(type),
+            `${type} passes the eligibility gate but the schema cannot store it`);
+    }
+
+    // And prove it against the schema itself, not just the constant.
+    for (const accountType of [...ELIGIBLE_INSTAGRAM_ACCOUNT_TYPES, 'UNKNOWN']) {
+        const doc = new InstagramAccount({
+            user: '64f0000000000000000000aa',
+            igUserId: '178414',
+            accessToken: 'T',
+            accountType,
+            dataSource: 'connected',
+            status: 'connected',
+        });
+        const invalid = doc.validateSync();
+        assert.equal(invalid, undefined,
+            `accountType=${accountType} fails validation: ${invalid && Object.keys(invalid.errors)}`);
+    }
+});
+
+test('a MEDIA_CREATOR account completes the callback', async () => {
+    // End to end, the account type that could not connect in production.
+    const { saved } = await runCallback({
+        handler: (url) => {
+            if (url.host === 'api.instagram.com') return { json: { data: [{ access_token: 'SHORT', user_id: 178414 }] } };
+            if (url.pathname === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
+            return { json: profileJson({ user_id: '178414', account_type: 'MEDIA_CREATOR' }) };
+        },
+    });
+
+    assert.equal(saved.doc.accountType, 'MEDIA_CREATOR');
+
+    const { InstagramAccount } = await import('../src/models/InstagramAccount.js');
+    assert.equal(new InstagramAccount(saved.doc).validateSync(), undefined,
+        'the document the callback builds must be storable');
+});
+
 test('a missing account_type is accepted under Business Login and refused elsewhere', () => {
     // The login is the evidence: `instagram_business_*` scopes cannot be granted
     // by a personal account. Refusing here would reject every eligible creator

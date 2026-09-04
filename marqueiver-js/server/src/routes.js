@@ -34,6 +34,10 @@ api.use('/notifications', notificationRoutes);
 api.use('/admin', adminRoutes);
 api.use('/', youtubeRoutes);
 api.use('/', facebookRoutes);
-// Public status lookup for the URL returned to Meta's Data Deletion callback.
-api.use('/data-deletion', metaRoutes);
+/**
+ * Meta endpoints that belong to no single platform module: the public data
+ * deletion status lookup. Mounted at the root because the router writes its own
+ * full paths — see meta.routes.js.
+ */
+api.use('/', metaRoutes);
 export default api;

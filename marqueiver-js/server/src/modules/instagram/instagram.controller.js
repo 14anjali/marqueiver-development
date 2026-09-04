@@ -188,9 +188,24 @@ export const instagramCallback = catchAsync(async (req, res) => {
       ? err.message
       : 'Instagram connection failed. Please try again.';
 
+    /**
+     * Enough to identify the failure without leaking anything.
+     *
+     * This logged only `code` and `providerCode`, and a Mongoose ValidationError
+     * carries neither — so a real, reproducible bug (an account_type the schema
+     * would not accept) reported itself as
+     *   { code: 'UNKNOWN', providerCode: null }
+     * which names nothing and points nowhere. `name` separates a provider
+     * failure from our own, and `invalidFields` gives the schema path when
+     * validation is what rejected it. Field *names* only: the values are the
+     * creator's profile data and the token is in this scope.
+     */
     logger.warn('Instagram callback failed', {
+      name: err?.name ?? 'Error',
       code: err?.code ?? 'UNKNOWN',
       providerCode: err?.details?.providerCode ?? null,
+      invalidFields: err?.errors ? Object.keys(err.errors) : undefined,
+      message: err instanceof ApiError ? err.message : undefined,
     });
 
     return redirectResult(res, false, message);
