@@ -6,6 +6,33 @@ import { logger } from '../../config/logger.js';
 import { verifyAccess } from '../../utils/tokens.js';
 import { InstagramAccount, CreatorProfile, User } from '../../models/index.js';
 import * as instagramService from '../../services/instagram.service.js';
+import { describeError, userFacingMessage } from '../../utils/describeError.js';
+
+/**
+ * Run one step of the OAuth callback, logging its start and its failure.
+ *
+ * The point is the `operation` name. The callback makes six calls that can fail
+ * for unrelated reasons, and the log said only that "the callback" failed —
+ * so a token-exchange problem, an ineligible account and a database write were
+ * indistinguishable, and every one of them looked like the last bug we fixed.
+ *
+ * The step name is stamped onto the error so the single catch at the bottom can
+ * report which operation it came from, without a try/catch per step.
+ */
+async function step(operation, fn) {
+  logger.info('Instagram OAuth step:', { operation, status: 'started' });
+  try {
+    const result = await fn();
+    logger.info('Instagram OAuth step:', { operation, status: 'ok' });
+    return result;
+  } catch (err) {
+    logger.warn('Instagram OAuth step failed:', { operation, ...describeError(err) });
+    // Non-objects (a thrown string or null) cannot carry a property; the catch
+    // below falls back to 'unknown' for those, which describeError also flags.
+    if (err && typeof err === 'object') err.marqueiverStep = operation;
+    throw err;
+  }
+}
 
 /**
  * Instagram OAuth + data sync (SRS FR-4, FR-5).
@@ -34,8 +61,13 @@ async function persistProfile(userId, token, profile) {
    *
    * Then uniqueness: one Instagram account belongs to one Marqueiver user.
    */
-  const accountType = assertInstagramEligible(profile, { businessLogin: true });
-  await assertNotLinkedElsewhere('instagram', profile.id, userId);
+  // Step 7 — eligibility.
+  const accountType = await step('assertInstagramEligible', async () =>
+    assertInstagramEligible(profile, { businessLogin: true }));
+
+  // Step 8 — one Instagram account belongs to one Marqueiver user.
+  await step('assertNotLinkedElsewhere', () =>
+    assertNotLinkedElsewhere('instagram', profile.id, userId));
 
   const doc = {
     user: userId,
@@ -77,14 +109,15 @@ async function persistProfile(userId, token, profile) {
     lastSyncedAt: new Date(),
   };
 
-  const account = await InstagramAccount.findOneAndUpdate(
+  // Step 9a — the account record itself.
+  const account = await step('saveInstagramAccount', () => InstagramAccount.findOneAndUpdate(
     { user: userId },
     doc,
-    { upsert: true, new: true, setDefaultsOnInsert: true },
-  );
+    { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true },
+  ));
 
-  // Mirror into the creator profile's socialAccounts (reuse existing shape).
-  const creator = await CreatorProfile.findOne({ user: userId });
+  // Step 9b — mirror into the creator profile's socialAccounts.
+  const creator = await step('mirrorToCreatorProfile', () => CreatorProfile.findOne({ user: userId }));
   if (creator) {
     const entry = {
       platform: 'instagram',
@@ -97,13 +130,23 @@ async function persistProfile(userId, token, profile) {
     const idx = (creator.socialAccounts || []).findIndex((s) => s.platform === 'instagram');
     if (idx >= 0) creator.socialAccounts[idx] = entry;
     else creator.socialAccounts.push(entry);
-    await creator.save();
+    await step('saveCreatorProfile', () => creator.save());
   }
 
-  // Update user's connectedAccounts
-  await User.findByIdAndUpdate(userId, {
+  /**
+   * Step 9c — the user's connected-accounts rollup.
+   *
+   * `connectedAccounts` was written here, in facebook.controller.js and in
+   * youtube.controller.js, and declared in none of them: it was not a path on
+   * the User schema. In strict mode Mongoose strips undeclared paths from an
+   * update, so `$addToSet` cast down to `{}` — an empty update document, which
+   * the driver rejects. Six write sites, every one of them either a silent
+   * no-op or a throw at the very end of a connection that had otherwise
+   * succeeded. The field is now declared on the schema.
+   */
+  await step('updateConnectedAccounts', () => User.findByIdAndUpdate(userId, {
     $addToSet: { connectedAccounts: 'instagram' },
-  });
+  }));
 
   return account;
 }
@@ -153,62 +196,84 @@ export const instagramCallback = catchAsync(async (req, res) => {
    * uses, so onboarding stays in control of what happens next.
    */
   try {
-    // Step 1 — exchange the code. This already returns the Instagram user id.
-    const token = await instagramService.exchangeCodeForToken(String(code));
+    // Step 2 — exchange the code. This already returns the Instagram user id.
+    const token = await step('exchangeCodeForToken', () =>
+      instagramService.exchangeCodeForToken(String(code)));
 
     /**
-     * Step 2 — establish the Instagram user id.
+     * Step 3 — what did the token response actually contain?
+     *
+     * Shape only, never contents. Whether `user_id` came back decides whether
+     * step 5 runs at all, and "did Instagram return an id" was previously
+     * unanswerable from the logs — which is why a missing id looked like a
+     * `/me` bug rather than a token-parsing one.
+     */
+    logger.info('Instagram OAuth step:', {
+      operation: 'inspectTokenResponse',
+      status: 'ok',
+      hasAccessToken: Boolean(token.access_token),
+      hasUserId: Boolean(token.user_id),          // step 4
+      userIdLength: String(token.user_id ?? '').length,
+      longLived: token.longLived === true,
+      expiresInSeconds: token.expires_in ?? null,
+      scopeCount: Array.isArray(token.scopes) ? token.scopes.length : 0,
+    });
+
+    /**
+     * Step 5 — establish the Instagram user id.
      *
      * Preferred from the token response, which carries it: the previous code
      * always spent a `/me` round-trip to re-fetch a value it had just been
      * handed, so when that one endpoint broke the whole connection failed with
      * a 500 even though nothing was actually wrong with the account. `/me` is
-     * now only the fallback for the older token shape that omits `user_id`.
+     * now only the fallback for the older token shape that omits `user_id`, and
+     * the log above says which path this run took.
      */
     let igUserId = token.user_id;
     if (!igUserId) {
-      const me = await instagramService.fetchMe(token.access_token);
+      const me = await step('fetchMe', () => instagramService.fetchMe(token.access_token));
       igUserId = me.id;
     }
 
-    // Step 3 — full profile, which is what eligibility is judged on.
-    const profile = await instagramService.fetchProfile(token.access_token, igUserId);
+    // Step 6 — full profile, which is what eligibility is judged on.
+    const profile = await step('fetchProfile', () =>
+      instagramService.fetchProfile(token.access_token, igUserId));
 
-    // Step 4 — persist (eligibility + uniqueness gates live in persistProfile).
+    logger.info('Instagram OAuth step:', {
+      operation: 'inspectProfile',
+      status: 'ok',
+      hasId: Boolean(profile.id),
+      hasUsername: Boolean(profile.username),
+      accountType: profile.account_type ?? '(not returned)',
+      followersCount: profile.followers_count ?? null,
+    });
+
+    // Steps 7–9 — eligibility, uniqueness and persistence, each logged inside.
     await persistProfile(claims.sub, token, { ...profile, id: profile.id ?? igUserId });
 
+    // Step 10 — redirect back into onboarding.
+    logger.info('Instagram OAuth step:', { operation: 'callback', status: 'succeeded' });
     return redirectResult(res, true, 'Instagram connected');
   } catch (err) {
     /**
-     * Meaningful failures carry their own message — "must be a Creator or
-     * Business account", "authorization expired". Anything without one is a
-     * genuine surprise, and gets a neutral line rather than an internal detail.
-     */
-    const message = err instanceof ApiError
-      ? err.message
-      : 'Instagram connection failed. Please try again.';
-
-    /**
-     * Enough to identify the failure without leaking anything.
+     * One line that actually names the failure.
      *
-     * This logged only `code` and `providerCode`, and a Mongoose ValidationError
-     * carries neither — so a real, reproducible bug (an account_type the schema
-     * would not accept) reported itself as
-     *   { code: 'UNKNOWN', providerCode: null }
-     * which names nothing and points nowhere. `name` separates a provider
-     * failure from our own, and `invalidFields` gives the schema path when
-     * validation is what rejected it. Field *names* only: the values are the
-     * creator's profile data and the token is in this scope.
+     * `describeError` reads the message wherever the thrower left it — our
+     * ApiError details, an HTTP client's `response.data.error`, a fetch
+     * `cause`, Mongoose's `errors` — and says plainly when what was thrown was
+     * not an Error at all. Everything it emits is redacted.
+     *
+     * The previous version read `message` only for ApiError, so every failure
+     * that was not one of ours reported `message: undefined` — the reporting
+     * discarded the one field that would have identified it.
      */
-    logger.warn('Instagram callback failed', {
-      name: err?.name ?? 'Error',
-      code: err?.code ?? 'UNKNOWN',
-      providerCode: err?.details?.providerCode ?? null,
-      invalidFields: err?.errors ? Object.keys(err.errors) : undefined,
-      message: err instanceof ApiError ? err.message : undefined,
+    logger.warn('Instagram OAuth callback failed:', {
+      operation: err?.marqueiverStep ?? 'unknown',
+      ...describeError(err),
     });
 
-    return redirectResult(res, false, message);
+    return redirectResult(res, false,
+      userFacingMessage(err, 'Instagram connection failed. Please try again.'));
   }
 });
 

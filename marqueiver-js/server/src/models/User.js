@@ -75,6 +75,26 @@ const userSchema = new Schema({
         enum: ['none', 'warning', 'restriction', 'suspension', 'termination'],
         default: 'none',
     },
+    /**
+     * Which social platforms this user has connected.
+     *
+     * Declared because six places already write it — the Instagram, Facebook
+     * and YouTube connect and disconnect handlers all `$addToSet` / `$pull`
+     * here — and none of them worked. `connectedAccounts` was not a path on
+     * this schema, and in strict mode Mongoose strips undeclared paths out of
+     * an update; with nothing left, `$addToSet: { connectedAccounts: … }` cast
+     * down to `{}`, an empty update document that the driver refuses.
+     *
+     * So every social connection ended by either doing nothing or throwing at
+     * the last step, after the account record had already been written. The
+     * InstagramAccount / FacebookPage / YouTubeChannel collections remain the
+     * source of truth; this is the denormalised rollup those handlers assume.
+     */
+    connectedAccounts: {
+        type: [String],
+        enum: ['instagram', 'facebook', 'youtube'],
+        default: [],
+    },
     onboardingComplete: { type: Boolean, default: false },
     // Resumable onboarding (feature #4 — save/resume): last step the user reached,
     // so a reload/relogin mid-onboarding continues where they left off instead of
