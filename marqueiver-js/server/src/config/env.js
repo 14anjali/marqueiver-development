@@ -205,6 +205,22 @@ resendApiKey: process.env.RESEND_API_KEY ?? '',
         graphVersion: (process.env.INSTAGRAM_GRAPH_VERSION ?? '').trim().replace(/^\/+|\/+$/g, ''),
         redirectUri: process.env.INSTAGRAM_REDIRECT_URI
             ?? `${process.env.API_URL ?? 'http://localhost:4000'}/api/auth/instagram/callback`,
+
+        /**
+         * Run the token diagnostics when a profile read fails.
+         *
+         * **On by default**, deliberately. This was opt-in behind
+         * INSTAGRAM_DIAGNOSTICS=1 for two releases, and in both the connect was
+         * retried without the flag set — so the failure reproduced and produced
+         * no evidence, and the next step was another guess. Diagnostics nobody
+         * remembers to switch on are diagnostics that do not exist.
+         *
+         * The cost is bounded and paid only on a path that has already failed:
+         * a handful of extra requests on a connect that was going to error
+         * anyway. Set INSTAGRAM_DIAGNOSTICS=0 to silence it once the
+         * integration is healthy.
+         */
+        diagnostics: bool(process.env.INSTAGRAM_DIAGNOSTICS, true),
     },
   
     google: {

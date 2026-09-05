@@ -215,6 +215,30 @@ async function igGet(path, params, label) {
 
     lastFailure = { status: res.status, body, text };
 
+    /**
+     * The exact request Meta refused, minus the credential.
+     *
+     * `url.origin + url.pathname` is the full target with the query string —
+     * and therefore the access token — removed, so the URL that failed can be
+     * compared against the documentation character by character without the
+     * token ever reaching a log. `x-fb-request-id` is what Meta support asks
+     * for first if this has to be escalated to them.
+     */
+    logger.warn('Instagram graph request refused:', {
+      operation: 'graphRequest',
+      method: 'GET',
+      endpoint: `${url.origin}${url.pathname}`,      // token-free by construction
+      queryKeys: [...url.searchParams.keys()].filter((k) => k !== 'access_token'),
+      fields: url.searchParams.get('fields') ?? null,
+      httpStatus: res.status,
+      providerCode: body?.error?.code ?? null,
+      providerSubcode: body?.error?.error_subcode ?? null,
+      providerType: body?.error?.type ?? null,
+      providerMessage: body?.error?.message ?? null,
+      fbRequestId: res.headers?.get?.('x-fb-request-id') ?? null,
+      fbTraceId: body?.error?.fbtrace_id ?? null,
+    });
+
     // Only a path-shaped rejection is worth another form.
     if (isPathRejection(body) && i < candidates.length - 1) continue;
     break;
@@ -439,11 +463,26 @@ export async function exchangeCodeForToken(code) {
     appIdUsed: env.instagram.appId,          // public identifier, not a secret
     tokenPrefix: String(parsed.accessToken).slice(0, 8),
     tokenLength: String(parsed.accessToken).length,
+    tokenEmpty: !parsed.accessToken,
     grantedPermissions: parsed.permissions,  // raw — NOT the DEFAULT_SCOPES fallback
     grantedCount: parsed.permissions.length,
     requestedScopes: DEFAULT_SCOPES,
     userId: parsed.userId,                   // an account id, not a credential
-    userIdPrefix: String(parsed.userId).slice(0, 6),
+    /**
+     * The whole token response, with only the token itself removed.
+     *
+     * Whether Instagram answered `{data:[{…}]}` or a flat object, and whether
+     * it included a `permissions` key at all, decides how the response should
+     * be read — and neither has ever been visible. Everything except
+     * `access_token` is structural or public.
+     */
+    rawResponseShape: (() => {
+      const redact = (o) => Object.fromEntries(Object.entries(o ?? {})
+        .map(([k, v]) => [k, k === 'access_token' ? '[REDACTED]' : v]));
+      return Array.isArray(json?.data)
+        ? { shape: 'data[]', keys: Object.keys(json.data[0] ?? {}), first: redact(json.data[0]) }
+        : { shape: 'flat', keys: Object.keys(json ?? {}), body: redact(json) };
+    })(),
   });
 
   /**
@@ -648,11 +687,15 @@ export async function diagnoseInstagramToken(accessToken, igUserId) {
         probe: label,
         // Host and path only — the query string carries the token.
         endpoint: `${target.origin}${target.pathname}`,
+        method: 'GET',
         status: res.status,
         ok: res.ok,
         providerCode: body?.error?.code ?? null,
         providerSubcode: body?.error?.error_subcode ?? null,
+        providerType: body?.error?.type ?? null,
         providerMessage: body?.error?.message ?? null,
+        fbRequestId: res.headers?.get?.('x-fb-request-id') ?? null,
+        fbTraceId: body?.error?.fbtrace_id ?? null,
         // Field NAMES only. The values are the person's profile.
         returnedFields: res.ok && body ? Object.keys(body).slice(0, 12) : undefined,
       });
