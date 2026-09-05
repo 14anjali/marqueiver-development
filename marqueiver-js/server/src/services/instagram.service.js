@@ -56,8 +56,7 @@ const IG_GRAPH_HOST = 'https://graph.instagram.com';
 // Business Login scopes.
 const DEFAULT_SCOPES = [
   'instagram_business_basic',
-  'instagram_business_content_publish',
-  'instagram_business_manage_insights',
+  'instagram_business_manage_insights'
 ];
 
 /** Short-lived Instagram tokens last an hour; long-lived ones sixty days. */
