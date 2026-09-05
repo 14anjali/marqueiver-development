@@ -146,6 +146,21 @@ resendApiKey: process.env.RESEND_API_KEY ?? '',
     appSecret: process.env.FACEBOOK_APP_SECRET ?? '',
     graphVersion: process.env.FACEBOOK_GRAPH_VERSION ?? 'v23.0',
     redirectUri: process.env.FACEBOOK_REDIRECT_URI ?? '',
+
+    /**
+     * Facebook Login **for Business** configuration id.
+     *
+     * Set this only if the app uses Login for Business, where the dashboard
+     * configuration carries the permission list and the OAuth dialog takes
+     * `config_id` — `scope` is ignored in that flow, so sending it yields a
+     * consent screen that grants nothing and Page calls that then fail with
+     * "permission missing", which reads like a permissions bug rather than the
+     * configuration mistake it is.
+     *
+     * Leave empty for classic Facebook Login and the scope list in
+     * facebook.service.js is used instead.
+     */
+    configId: process.env.FACEBOOK_CONFIG_ID ?? '',
   },
 
   /**

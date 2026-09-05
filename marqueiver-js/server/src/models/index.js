@@ -12,7 +12,7 @@ export { Otp } from './Otp.js';
 export { InstagramAccount } from './InstagramAccount.js';
 export { User } from './User.js';
 export { CreatorProfile } from './CreatorProfile.js';
-export { InstagramMedia } from './InstagramMedia.js';
+
 export { YouTubeChannel } from './YoutubeChannel.js';
 export { FacebookPage } from './FacebookPage.js';
 export { SavedCreator } from './SavedCreator.js';
@@ -20,3 +20,4 @@ export { Wallet } from './Wallet.js';export { NegotiationThread, Offer } from '.
 export { Policy, PolicyAcceptance, POLICY_SLUGS } from './Policy.js';
 export { Payout, CommissionRecord } from './Payout.js';
 export { DataDeletionRequest } from './DataDeletionRequest.js';
+export { InstagramMedia } from './InstagramMedia.js';

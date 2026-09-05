@@ -1,571 +1,745 @@
-import crypto from 'node:crypto';
+import crypto from 'crypto';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import { ApiError } from '../utils/apiError.js';
 import { requestSupportedMetrics, normaliseInsights } from '../utils/metricDiscovery.js';
 
 /**
- * Facebook Pages integration — **Facebook Login**, Graph API, `graph.facebook.com`.
+ * Instagram OAuth + Graph integration — **Instagram API with Instagram Login**
+ * (Meta's "Business Login for Instagram"), not Facebook Login and not the
+ * retired Basic Display API.
  *
- * This is a different flow from the Instagram integration and shares nothing
- * with it. Instagram uses Instagram Login against `graph.instagram.com` with an
- * Instagram User access token; that token is not valid here and this one is not
- * valid there. Two products of one Meta app, two token families.
+ * The three things that identify the flow, and that the rest of this file
+ * depends on being true:
  *
- * ── What this replaces ─────────────────────────────────────────────────────
- * The previous version made exactly two Graph calls — `/oauth/access_token` and
- * `/me` — and `fetchManagedPages()` was a stub that returned `[]`. There was no
- * Page list, no Page access token, no publishing and no comment handling, so
- * every Page capability the product needs was absent.
+ *   authorize   https://www.instagram.com/oauth/authorize   ← instagram.com, not facebook.com
+ *   token       https://api.instagram.com/oauth/access_token
+ *   graph       https://graph.instagram.com                 ← not graph.facebook.com
+ *   scopes      instagram_business_basic, …_content_publish, …_manage_insights
  *
- * It also requested ten permissions and used one. `user_posts`, `user_photos`,
- * `user_friends`, `user_likes`, `user_birthday`, `user_age_range`, `user_link`
- * and `user_location` were all in the scope string and none appeared in any
- * request. That is not merely untidy: App Review requires a screencast
- * demonstrating each requested permission in use, so a permission the code
- * never exercises cannot be demonstrated and fails the submission. The scope is
- * now exactly the four Page permissions the code below actually calls, plus
- * `public_profile`.
+ * The token this yields is an **Instagram User access token**. It is not a
+ * Facebook/Meta user token and it is not interchangeable with one: it is only
+ * valid against `graph.instagram.com`, and sending it to `graph.facebook.com`
+ * fails. That is why nothing here shares a host or a token with the Facebook
+ * integration, and why fixing this file cannot affect Facebook or Google auth.
  *
- * ── Token model ────────────────────────────────────────────────────────────
- *   authorization code  →  short-lived USER token (~1 hour)
- *                       →  long-lived USER token (~60 days, fb_exchange_token)
- *                       →  PAGE access token, read from /me/accounts
+ * ── The production failure this file was rewritten to fix ──────────────────
+ * `GET https://graph.instagram.com/v22.0/me` returned
+ *   {"error":{"message":"Unsupported request - method type: get",
+ *             "type":"IGApiException","code":100}}
  *
- * The order matters. A Page token derived from a *short-lived* user token
- * expires with it; one derived from a long-lived user token does not expire at
- * all while the user keeps the app authorised. Publishing on behalf of a Page
- * uses the Page token, never the user token.
+ * That message is the host rejecting the **path**, not the fields — an invalid
+ * field produces `Tried accessing nonexisting field (…) on node type (…)`
+ * instead. `graph.instagram.com` reads a leading `/v22.0/` segment it does not
+ * recognise as a node id, so the request became "GET the node named v22.0",
+ * which supports no GET. Every call in this file carried that prefix, so the
+ * damage was wider than the one 500:
+ *
+ *   - `/v22.0/me`            → the 500 in the logs (uncaught)
+ *   - `/v22.0/{id}`          → would have failed next, in fetchProfile
+ *   - `/v22.0/access_token`  → the long-lived token exchange, **silently
+ *                              swallowed** by a catch that logged a warning and
+ *                              carried on. Production has therefore been
+ *                              storing one-hour tokens stamped with a sixty-day
+ *                              expiry, so connections die overnight and the
+ *                              database says they are fine.
+ *
+ * Requests now go through `igGet`, which uses the documented unversioned path
+ * and falls back across candidates on a path-shaped rejection, logging which
+ * form worked so a version can be pinned deliberately rather than guessed.
  */
 
-const GRAPH_VERSION = env.facebook.graphVersion || 'v23.0';
-const GRAPH_URL = `https://graph.facebook.com/${GRAPH_VERSION}`;
+const IG_AUTHORIZE = 'https://www.instagram.com/oauth/authorize';
+const IG_TOKEN = 'https://api.instagram.com/oauth/access_token';
+const IG_GRAPH_HOST = 'https://graph.instagram.com';
 
-/**
- * The permissions this file actually uses, and where each one is spent.
- *
- *   public_profile         granted by default; identifies the person connecting
- *   pages_show_list        GET /me/accounts               → listPages()
- *   pages_read_engagement  GET /{page}, /{page}/posts,
- *                          /{post}/comments               → fetchPage/Posts/Comments
- *   pages_manage_posts     POST/DELETE /{page}/feed       → publishPost/deletePost
- *   pages_manage_engagement POST/DELETE /{comment}        → replyTo/hide/deleteComment
- *
- * `email` is deliberately absent: nothing stores or reads an email address from
- * Facebook, and an unused permission is a review liability rather than a
- * harmless extra. Add it back only alongside code that uses it.
- *
- * All four pages_* permissions need **Advanced Access** before anyone outside
- * the app's own testers can grant them.
- */
-export const REQUIRED_SCOPES = [
-    'public_profile',
-    'pages_show_list',
-    'pages_read_engagement',
-    // Analytics. Separate from pages_read_engagement on purpose: engagement
-    // reads content, read_insights reads metrics, and holding one does not
-    // grant the other — a distinction that surfaces as an empty analytics page
-    // rather than an error if it is missed.
-    'read_insights',
-    'pages_manage_posts',
-    'pages_manage_engagement',
+// Business Login scopes.
+const DEFAULT_SCOPES = [
+  'instagram_business_basic',
+  'instagram_business_content_publish',
+  'instagram_business_manage_insights',
 ];
 
-/** Generate a random OAuth state nonce. */
-export function newState() {
-    return crypto.randomBytes(32).toString('hex');
+/** Short-lived Instagram tokens last an hour; long-lived ones sixty days. */
+const SHORT_LIVED_TTL_SECONDS = 3600;
+const LONG_LIVED_TTL_SECONDS = 5_184_000;
+
+/**
+ * Check whether Instagram is configured for live OAuth.
+ */
+export function isLiveMode() {
+  return (
+    env.integrationMode === 'live' &&
+    !!env.instagram.appId &&
+    !!env.instagram.appSecret
+  );
 }
 
-/* ─────────────────────────── request plumbing ────────────────────────────── */
+/* ────────────────────────── graph request layer ──────────────────────────── */
+
+/**
+ * Candidate URLs for a graph path, best-documented first.
+ *
+ * With no version configured this is a single unversioned URL and there is no
+ * fallback behaviour at all. A configured version is tried first and the
+ * unversioned form kept as a safety net, because pinning a version that the
+ * host later stops accepting should degrade to a logged warning rather than to
+ * the outage this file just had.
+ */
+export function graphCandidates(path, version = env.instagram.graphVersion) {
+  const clean = String(path).replace(/^\/+/, '');
+  const unversioned = `${IG_GRAPH_HOST}/${clean}`;
+  if (!version) return [unversioned];
+  return [`${IG_GRAPH_HOST}/${version}/${clean}`, unversioned];
+}
+
+/**
+ * Is this the host telling us the *path* is wrong, rather than the fields or
+ * the token? Only that is worth retrying against another path form; a bad
+ * token or a missing permission would return the same answer every time and
+ * retrying would just double the latency of a guaranteed failure.
+ */
+function isPathRejection(body) {
+  const err = body?.error;
+  if (!err) return false;
+  return Number(err.code) === 100
+    && /unsupported\s+(get\s+)?request|method type/i.test(String(err.message ?? ''));
+}
+
+/** The field name Meta names in a "nonexisting field" error, if that's what this is. */
+function nonexistentField(body) {
+  const message = String(body?.error?.message ?? '');
+  const match = message.match(/nonexisting field \(([^)]+)\)/i);
+  return match ? match[1] : null;
+}
+
+/**
+ * A provider error the UI can act on, carrying Instagram's own message.
+ *
+ * The message is included deliberately — the standing rule here is not to hide
+ * provider errors behind a generic 500, because that is what turned this bug
+ * into a production mystery. The access token never appears: it travels in the
+ * query string, so the URL is never logged or interpolated into an error.
+ */
+function igError(label, status, body, rawText) {
+  const provider = body?.error?.message ?? String(rawText ?? '').slice(0, 300);
+  const providerCode = body?.error?.code;
+
+  // Instagram signals a dead or revoked token as 190 (and 102 for a session
+  // problem). syncInstagram matches on the message to mark the account expired,
+  // so that wording is kept intact.
+  const isAuth = status === 401 || [190, 102, 463, 467].includes(Number(providerCode));
+
+  return new ApiError(
+    isAuth ? 401 : 502,
+    isAuth ? 'INSTAGRAM_TOKEN_INVALID' : 'INSTAGRAM_API_ERROR',
+    isAuth
+      ? 'Instagram authorization expired or was revoked — please reconnect.'
+      : `Instagram ${label} failed: ${provider}`,
+    {
+      platform: 'instagram',
+      providerCode: providerCode ?? null,
+      providerStatus: status,
+      // Kept verbatim so the field-narrowing retry can read the field name
+      // Instagram named, even when the message above was replaced.
+      providerMessage: String(provider),
+    },
+  );
+}
 
 /**
  * `fetch`, with transport failures turned into ApiErrors.
  *
- * An unreachable host makes `fetch` throw `TypeError: fetch failed`, whose
- * message names neither host nor reason — the real cause sits on `err.cause`.
- * Left unwrapped those arrive at the callback as anonymous throws with no code
- * and nothing to report, which is precisely how the Instagram integration
- * became undebuggable. The URL is never included: it carries the access token.
+ * An unreachable host, a DNS failure, a TLS problem or a socket reset makes
+ * `fetch` throw `TypeError: fetch failed` — a message that names neither the
+ * host nor the reason, with the real cause hidden on `err.cause`. Every one of
+ * those escaped this module unwrapped, so the callback's handler received
+ * something with no `code`, no `details`, and a message that says nothing:
+ *
+ *   { name: 'Error', code: 'UNKNOWN', providerCode: null, message: undefined }
+ *
+ * which is exactly the shape production reported. A network failure is a
+ * legitimate outcome and should be reported as one, not leak out as an
+ * anonymous throw. The URL is never included — it carries the access token.
  */
-async function fbFetch(url, init, label) {
-    try {
-        return await fetch(url, init);
-    } catch (err) {
-        throw new ApiError(502, 'FACEBOOK_UNREACHABLE',
-            `Facebook could not be reached during ${label}. Please try again shortly.`,
-            {
-                platform: 'facebook',
-                providerMessage: String(err?.cause?.code ?? err?.cause?.message ?? err?.message ?? 'network error'),
-                providerCode: null,
-                providerStatus: null,
-            });
-    }
+async function igFetch(url, init, label) {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    throw new ApiError(502, 'INSTAGRAM_UNREACHABLE',
+      `Instagram could not be reached during ${label}. Please try again shortly.`,
+      {
+        platform: 'instagram',
+        // The cause is where undici puts the real reason (ENOTFOUND, ECONNRESET,
+        // UND_ERR_CONNECT_TIMEOUT…). Never the URL.
+        providerMessage: String(err?.cause?.code ?? err?.cause?.message ?? err?.message ?? 'network error'),
+        providerCode: null,
+        providerStatus: null,
+      });
+  }
 }
 
 /**
- * Map a Graph error onto something the UI can act on.
+ * GET a graph.instagram.com node, trying each candidate path form.
  *
- * Meta's error codes are the difference between "the user must do something",
- * "you must ship something", and "try again later", and collapsing them into a
- * generic 500 loses exactly the distinction the person needs. The token never
- * appears in the message — it travels in the query string, so the URL is never
- * interpolated into an error.
+ * @param {string} path    node path, e.g. 'me' or '17841400000000000'
+ * @param {object} params  query parameters (access_token included by caller)
+ * @param {string} label   what to call this in an error message
  */
-function fbError(label, status, body) {
-    const err = body?.error ?? {};
-    const code = Number(err.code);
-    const subcode = Number(err.error_subcode);
-    const message = err.message ?? 'Unknown Facebook error';
+async function igGet(path, params, label) {
+  const candidates = graphCandidates(path);
+  let lastFailure;
 
-    const detail = {
-        platform: 'facebook',
-        providerCode: Number.isFinite(code) ? code : null,
-        providerSubcode: Number.isFinite(subcode) ? subcode : null,
-        providerStatus: status,
-        providerMessage: String(message),
-        providerType: err.type ?? null,
-    };
-
-    // 190 is an expired/invalid/revoked token; 102 a session problem. Both mean
-    // the person must reconnect, and neither is worth retrying.
-    if (status === 401 || code === 190 || code === 102) {
-        return new ApiError(401, 'FACEBOOK_TOKEN_INVALID',
-            'Your Facebook authorisation has expired or was revoked — please reconnect.',
-            { ...detail, action: 'reconnect' });
+  for (let i = 0; i < candidates.length; i += 1) {
+    const url = new URL(candidates[i]);
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
     }
 
-    // 10 and the 200-family are permission failures: the app was not granted
-    // what this call needs, or the permission lacks Advanced Access.
-    if (code === 10 || (code >= 200 && code <= 299)) {
-        return new ApiError(403, 'FACEBOOK_PERMISSION_MISSING',
-            'Facebook did not grant Marq the permission this action needs.',
-            {
-                ...detail,
-                action: 'reconnect',
-                howTo: [
-                    'Reconnect Facebook and leave every requested permission ticked.',
-                    'Make sure you grant access to the Page you want to manage.',
-                    'If the app is still in Development Mode, the account must be an app Tester, Developer or Admin.',
-                ],
-            });
+    const res = await igFetch(url, undefined, label);
+    const text = await res.text().catch(() => '');
+    let body;
+    try { body = JSON.parse(text); } catch { body = null; }
+
+    if (res.ok) {
+      if (i > 0) {
+        // Never log `url` — it carries the access token.
+        logger.warn(
+          `Instagram ${label}: the configured graph version was rejected; `
+          + 'the unversioned path worked. Clear or correct INSTAGRAM_GRAPH_VERSION.',
+          { path, configuredVersion: env.instagram.graphVersion },
+        );
+      }
+      return body ?? {};
     }
 
-    // 4 and 17 are rate limits; 341 an application-level throttle.
-    if (code === 4 || code === 17 || code === 341 || status === 429) {
-        return new ApiError(429, 'FACEBOOK_RATE_LIMITED',
-            'Facebook is rate-limiting Marq right now. Please try again in a few minutes.',
-            detail);
-    }
+    lastFailure = { status: res.status, body, text };
 
-    // 100 with subcode 33 is "no such object, or you cannot see it" — almost
-    // always a Page the token has no role on, rather than a missing Page.
-    if (code === 100 && subcode === 33) {
-        return new ApiError(404, 'FACEBOOK_OBJECT_NOT_VISIBLE',
-            'That Facebook Page or post is not visible to your account.',
-            { ...detail, action: 'reconnect' });
-    }
+    // Only a path-shaped rejection is worth another form.
+    if (isPathRejection(body) && i < candidates.length - 1) continue;
+    break;
+  }
 
-    return new ApiError(502, 'FACEBOOK_API_ERROR',
-        `Facebook ${label} failed: ${message}`, detail);
+  throw igError(label, lastFailure.status, lastFailure.body, lastFailure.text);
 }
 
-/** One Graph request, parsed and error-mapped. */
-async function graph(path, { method = 'GET', params = {}, body, accessToken, label }) {
-    const url = new URL(`${GRAPH_URL}/${String(path).replace(/^\/+/, '')}`);
-    for (const [key, value] of Object.entries(params)) {
-        if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
-    }
+/**
+ * GET a node, dropping fields Meta says do not exist and retrying.
+ *
+ * Field availability on the Instagram node has moved between API generations —
+ * `account_type` in particular exists under some configurations and not others.
+ * Losing an optional field should cost us that field, not the whole connection:
+ * before this, one retired field name would have failed the entire callback and
+ * blocked onboarding for every creator.
+ *
+ * Bounded by the number of fields, and each drop is logged so a permanently
+ * absent field gets noticed rather than silently tolerated forever.
+ */
+async function igGetFields(path, fields, accessToken, label, extraParams = {}) {
+  let remaining = [...fields];
 
-    const init = { method };
-    if (accessToken) {
-        // In the Authorization header rather than the query string, so the token
-        // cannot end up in an intermediary's request log.
-        init.headers = { Authorization: `Bearer ${accessToken}` };
-    }
-    if (body) {
-        init.headers = { ...init.headers, 'Content-Type': 'application/x-www-form-urlencoded' };
-        init.body = new URLSearchParams(body);
-    }
+  for (let attempt = 0; attempt < fields.length; attempt += 1) {
+    try {
+      return await igGet(path, {
+        ...extraParams,
+        fields: remaining.join(','),
+        access_token: accessToken,
+      }, label);
+    } catch (err) {
+      const dropped = nonexistentField({
+        error: { message: err.details?.providerMessage ?? err.message },
+      });
 
-    const res = await fbFetch(url, init, label);
-    const text = await res.text().catch(() => '');
-    let json;
-    try { json = JSON.parse(text); } catch { json = null; }
+      if (!dropped || !remaining.includes(dropped) || remaining.length === 1) throw err;
 
-    if (!res.ok || json?.error) throw fbError(label, res.status, json);
-    return json ?? {};
+      remaining = remaining.filter((f) => f !== dropped);
+      logger.warn(`Instagram ${label}: dropping unsupported field "${dropped}" and retrying.`,
+        { remaining });
+    }
+  }
+
+  throw new ApiError(502, 'INSTAGRAM_API_ERROR',
+    `Instagram ${label} failed: no supported fields remained.`, { platform: 'instagram' });
+}
+
+/**
+ * Read a node's fields, trying each candidate node in turn.
+ *
+ * Only a *path* rejection moves to the next candidate — the host telling us the
+ * node is not routable. A bad token or a missing permission answers the same
+ * way whichever node is asked, so retrying those would only double the latency
+ * of a certain failure.
+ *
+ * Which node worked is logged, because "which node does this app's token
+ * actually address" is the question this integration has now got wrong twice,
+ * and it should be answerable from the logs rather than by reasoning.
+ */
+async function igGetFieldsFromNodes(nodes, fields, accessToken, label) {
+  let lastError;
+
+  for (let i = 0; i < nodes.length; i += 1) {
+    const kind = nodes[i] === 'me' ? 'me' : 'id';
+    const version = env.instagram.graphVersion ? `${env.instagram.graphVersion}/` : '';
+
+    logger.info('Instagram OAuth step:', {
+      operation: 'profileRequest',
+      status: 'started',
+      // Host and path only. The access token travels in the query string and
+      // must never reach a log line.
+      endpoint: `${IG_GRAPH_HOST}/${version}${nodes[i]}`,
+      node: kind,
+      fieldCount: fields.length,
+    });
+
+    try {
+      const result = await igGetFields(nodes[i], fields, accessToken, label);
+      logger.info('Instagram OAuth step:', {
+        operation: 'profileRequest',
+        status: 'ok',
+        node: kind,
+        fieldsReturned: Object.keys(result ?? {}),
+      });
+      return result;
+    } catch (err) {
+      lastError = err;
+
+      const pathRejected = isPathRejection({
+        error: {
+          code: err.details?.providerCode,
+          message: err.details?.providerMessage ?? err.message,
+        },
+      });
+
+      logger.warn('Instagram OAuth step failed:', {
+        operation: 'profileRequest',
+        node: kind,
+        status: err.details?.providerStatus ?? err.status,
+        providerCode: err.details?.providerCode ?? null,
+        providerMessage: err.details?.providerMessage ?? err.message,
+        willRetryOtherNode: pathRejected && i < nodes.length - 1,
+      });
+
+      if (pathRejected && i < nodes.length - 1) continue;
+      throw err;
+    }
+  }
+
+  throw lastError;
 }
 
 /* ──────────────────────────────── OAuth ──────────────────────────────────── */
 
 /**
- * Build the Facebook OAuth URL.
- *
- * ── Facebook Login vs Facebook Login for Business ──────────────────────────
- * These take different parameters, and sending the wrong one fails in a way
- * that looks like a permissions problem rather than a configuration one:
- *
- *   Facebook Login               `scope=<comma-separated permissions>`
- *   Facebook Login for Business  `config_id=<configuration id>` — the
- *                                configuration in the App Dashboard carries the
- *                                permission list, and `scope` is IGNORED.
- *
- * So an app using Login for Business with a `scope` string gets a consent
- * screen granting nothing, and every later Page call fails with "permission
- * missing". This picks by configuration rather than by assumption: set
- * `FACEBOOK_CONFIG_ID` and the Business flow is used, leave it unset and the
- * classic flow is. Which one you need is decided in the App Dashboard, not
- * here — see the setup notes.
+ * Build Instagram OAuth authorization URL.
  */
 export function buildAuthUrl(state) {
-    const params = new URLSearchParams({
-        client_id: env.facebook.appId,
-        redirect_uri: env.facebook.redirectUri,
-        state,
-        response_type: 'code',
-    });
+  const redirectUri = env.instagram.redirectUri;
 
-    if (env.facebook.configId) {
-        // Login for Business: the configuration owns the permission list.
-        params.set('config_id', env.facebook.configId);
-    } else {
-        params.set('scope', REQUIRED_SCOPES.join(','));
-    }
+  // Mock mode
+  if (!isLiveMode()) {
+    const u = new URL(env.instagram.redirectUri);
+    u.searchParams.set('code', 'mock_code_' + state);
+    u.searchParams.set('state', state);
+    return u.toString();
+  }
 
-    return `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth?${params}`;
+  const params = new URLSearchParams({
+    client_id: env.instagram.appId,
+    redirect_uri: redirectUri,
+    scope: DEFAULT_SCOPES.join(','),
+    response_type: 'code',
+    state,
+  });
+
+  return `${IG_AUTHORIZE}?${params.toString()}`;
 }
 
-/** True when this environment is configured for the Business login flow. */
-export const usesLoginForBusiness = () => Boolean(env.facebook.configId);
+/**
+ * Read the token response, which comes in two shapes.
+ *
+ * Business Login returns `{ data: [ { access_token, user_id, permissions } ] }`
+ * on current versions and a flat `{ access_token, user_id }` on older ones.
+ * The previous code read `json.user_id` only, so against the current shape the
+ * id came back `undefined` and was stored as an empty string — which is also
+ * why `igUserId` was empty on connected accounts and the duplicate-account
+ * index could never fire.
+ */
+export function readTokenResponse(json) {
+  const first = Array.isArray(json?.data) ? (json.data[0] ?? {}) : (json ?? {});
+  return {
+    accessToken: first.access_token ?? null,
+    userId: first.user_id != null ? String(first.user_id) : '',
+    permissions: Array.isArray(first.permissions)
+      ? first.permissions
+      : String(first.permissions ?? '').split(',').filter(Boolean),
+    expiresIn: Number(first.expires_in) || null,
+  };
+}
 
 /**
- * Exchange the authorization code for a short-lived user access token.
+ * Exchange Instagram authorization code for an access token.
  */
 export async function exchangeCodeForToken(code) {
-    const data = await graph('oauth/access_token', {
-        label: 'token exchange',
-        params: {
-            client_id: env.facebook.appId,
-            client_secret: env.facebook.appSecret,
-            redirect_uri: env.facebook.redirectUri,
-            code,
-        },
-    }).catch((err) => {
-        // A reused code is worth its own message: the user usually just
-        // refreshed the callback, and "try connecting again" is the fix.
-        if (err.details?.providerCode === 100 && /used|expired/i.test(err.details?.providerMessage ?? '')) {
-            throw new ApiError(400, 'FACEBOOK_CODE_ALREADY_USED',
-                'That Facebook authorization has already been used. Please start the connection again.',
-                { platform: 'facebook', action: 'retry' });
-        }
-        throw err;
-    });
+  // Mock mode
+  if (!isLiveMode()) {
+    const seed = hash(code);
+    return {
+      access_token: 'mock_token_' + seed,
+      user_id: 'ig_' + (seed % 100000000),
+      tokenType: 'bearer',
+      scopes: DEFAULT_SCOPES,
+      expires_in: LONG_LIVED_TTL_SECONDS,
+      longLived: true,
+    };
+  }
 
-    if (!data.access_token) {
-        throw new ApiError(502, 'FACEBOOK_TOKEN_MISSING',
-            'Facebook returned no access token for this authorization code.',
-            { platform: 'facebook' });
+  const body = new URLSearchParams({
+    client_id: env.instagram.appId,
+    client_secret: env.instagram.appSecret,
+    grant_type: 'authorization_code',
+    redirect_uri: env.instagram.redirectUri,
+    code,
+  });
+
+  const res = await igFetch(IG_TOKEN, { method: 'POST', body }, 'token exchange');
+  const text = await res.text().catch(() => '');
+  let json;
+  try { json = JSON.parse(text); } catch { json = null; }
+
+  if (!res.ok) throw igError('token exchange', res.status, json, text);
+
+  const parsed = readTokenResponse(json);
+  if (!parsed.accessToken) {
+    throw new ApiError(502, 'INSTAGRAM_TOKEN_MISSING',
+      'Instagram returned no access token for this authorization code.',
+      { platform: 'instagram' });
+  }
+
+  /**
+   * Upgrade to a long-lived token.
+   *
+   * Documented unversioned, and routed through `igGet` so a stray version
+   * prefix cannot silently break it the way it did before. A failure here is
+   * not fatal — the short-lived token still completes this connection — but the
+   * reported lifetime now matches the token we actually hold. Claiming sixty
+   * days for a one-hour token is worse than a short expiry, because the sync
+   * job trusts `tokenExpiresAt` and will not refresh what it believes is fresh.
+   */
+  let accessToken = parsed.accessToken;
+  let expiresIn = SHORT_LIVED_TTL_SECONDS;
+  let longLived = false;
+
+  try {
+    const long = await igGet('access_token', {
+      grant_type: 'ig_exchange_token',
+      client_secret: env.instagram.appSecret,
+      access_token: accessToken,
+    }, 'long-lived token exchange');
+
+    if (long?.access_token) {
+      accessToken = long.access_token;
+      expiresIn = Number(long.expires_in) || LONG_LIVED_TTL_SECONDS;
+      longLived = true;
     }
+  } catch (err) {
+    logger.warn(
+      'Instagram long-lived token exchange failed; keeping the short-lived token. '
+      + 'The connection will need reconnecting within the hour.',
+      { reason: err.message },
+    );
+  }
 
+  return {
+    access_token: accessToken,
+    user_id: parsed.userId,
+    tokenType: 'bearer',
+    scopes: parsed.permissions.length ? parsed.permissions : DEFAULT_SCOPES,
+    expires_in: expiresIn,
+    longLived,
+  };
+}
+
+/* ─────────────────────────────── graph reads ─────────────────────────────── */
+
+/**
+ * Fetch the connected Instagram user's id and username.
+ *
+ * Note this is now a *fallback*, not the primary source of the id: the token
+ * exchange already returns `user_id`, and the callback prefers it. Keeping a
+ * network round-trip on the critical path to fetch a value we were just handed
+ * is what turned a single broken endpoint into a failed connection.
+ *
+ * `user_id` is the Instagram-scoped id under Instagram Login; `id` is accepted
+ * as a fallback because the two generations of this API differ on which is
+ * returned, and the caller only needs whichever one identifies the account.
+ */
+export async function fetchMe(accessToken, igUserId) {
+  if (!isLiveMode() || String(accessToken).startsWith('mock_token_')) {
+    const seed = hash(accessToken);
     return {
-        access_token: data.access_token,
-        token_type: data.token_type || 'bearer',
-        expires_in: Number(data.expires_in) || 3600,
-        longLived: false,
+      id: igUserId || 'ig_' + (seed % 100000000),
+      username: 'creator_' + (seed % 9999),
     };
+  }
+
+  const p = await igGetFields('me', ['user_id', 'username'], accessToken, '/me fetch');
+
+  const id = p.user_id ?? p.id;
+  if (!id) {
+    throw new ApiError(502, 'INSTAGRAM_ID_MISSING',
+      'Instagram did not return an account id for this login.',
+      { platform: 'instagram' });
+  }
+
+  return { id: String(id), username: p.username };
 }
 
 /**
- * Upgrade a short-lived user token to a long-lived one (~60 days).
- *
- * This is not optional housekeeping. Page access tokens inherit the lifetime of
- * the user token they were read with, so skipping this step yields Page tokens
- * that die within the hour — the connection appears to succeed and then stops
- * working, with the database still reporting it healthy.
+ * Fetch the connected Instagram profile.
  */
-export async function exchangeForLongLivedToken(shortLivedToken) {
-    const data = await graph('oauth/access_token', {
-        label: 'long-lived token exchange',
-        params: {
-            grant_type: 'fb_exchange_token',
-            client_id: env.facebook.appId,
-            client_secret: env.facebook.appSecret,
-            fb_exchange_token: shortLivedToken,
-        },
-    });
-
-    if (!data.access_token) {
-        throw new ApiError(502, 'FACEBOOK_TOKEN_MISSING',
-            'Facebook returned no long-lived token.', { platform: 'facebook' });
-    }
-
+export async function fetchProfile(accessToken, igUserId) {
+  if (!isLiveMode() || String(accessToken).startsWith('mock_token_')) {
+    const seed = hash(accessToken);
     return {
-        access_token: data.access_token,
-        token_type: data.token_type || 'bearer',
-        // Long-lived user tokens are ~60 days; Facebook omits expires_in for
-        // some app types, so a documented default beats an absent expiry.
-        expires_in: Number(data.expires_in) || 5_184_000,
-        longLived: true,
+      id: igUserId || 'ig_' + (seed % 100000000),
+      username: 'creator_' + (seed % 9999),
+      name: 'Marqueiver Creator',
+      profile_picture_url: `https://i.pravatar.cc/300?u=${seed}`,
+      biography: 'Fitness & lifestyle creator on Marqueiver.',
+      followers_count: 10000 + ((seed * 137) % 500000),
+      follows_count: 100 + (seed % 2000),
+      media_count: 50 + (seed % 900),
+      account_type: ['PERSONAL', 'CREATOR', 'BUSINESS'][seed % 3],
+      is_verified: seed % 10 === 0,
+      website: 'https://marqueiver.com',
+      dataSource: 'connected',
     };
+  }
+
+  const FIELDS = [
+    'id', 'user_id', 'username', 'name', 'profile_picture_url',
+    'followers_count', 'follows_count', 'media_count',
+    'account_type', 'biography', 'website',
+  ];
+
+  /**
+   * Which node to read the profile from.
+   *
+   * This used `String(igUserId)` alone — the `user_id` handed back by the token
+   * exchange — and that is what production is failing on:
+   *
+   *   GET https://graph.instagram.com/{user_id}?fields=…
+   *   {"error":{"message":"Unsupported request - method type: get",
+   *             "type":"IGApiException","code":100}}
+   *
+   * That message is the host saying the *path* is not a routable node — the
+   * same class of failure as the `/v22.0/` prefix before it, and distinct from
+   * a bad field ("Tried accessing nonexisting field") or a bad object
+   * ("Object with ID … does not exist"). Under Instagram Login the token
+   * response's `user_id` is an app-scoped identifier; it identifies the account
+   * but is not addressable as a Graph node.
+   *
+   * `me` is. An Instagram User access token *is* the identity, so the node
+   * needs no id at all, and the response carries `id` and `user_id` anyway.
+   *
+   * Note this does not add a request: the profile fetch is one call either way,
+   * and it is the same call that was already being made — only the node
+   * changes. The id from the token is still used, as the second candidate and
+   * as the value persisted, so nothing is lost if `me` is ever refused.
+   */
+  const nodes = ['me', igUserId ? String(igUserId) : null].filter(Boolean);
+  const p = await igGetFieldsFromNodes(nodes, FIELDS, accessToken, 'profile fetch');
+
+  return {
+    id: String(p.user_id ?? p.id ?? igUserId),
+    username: p.username,
+    name: p.name || p.username,
+    profile_picture_url: p.profile_picture_url,
+    biography: p.biography,
+    followers_count: p.followers_count,
+    follows_count: p.follows_count,
+    media_count: p.media_count,
+    /**
+     * Left undefined rather than defaulted when Instagram does not return it.
+     * The old `|| 'BUSINESS'` meant an account whose type we never learned was
+     * recorded as eligible — the eligibility gate could not fail, because its
+     * input was manufactured. `assertInstagramEligible` decides what an absent
+     * type means; this function's job is to report what Instagram said.
+     */
+    account_type: p.account_type ? String(p.account_type).toUpperCase() : undefined,
+    is_verified: p.is_verified || false,
+    website: p.website,
+    dataSource: 'connected',
+  };
 }
 
-/** The person who authorised, so the connection can be attributed. */
-export async function fetchUserProfile(userAccessToken) {
-    const data = await graph('me', {
-        accessToken: userAccessToken,
-        label: 'user profile fetch',
-        params: { fields: 'id,name,picture.type(large)' },
-    });
-
-    return {
-        id: String(data.id),
-        name: data.name,
-        profilePicture: data.picture?.data?.url ?? null,
-    };
-}
-
-/* ────────────────────────────── Pages ────────────────────────────────────── */
+/* ─────────────────────────── media & insights ────────────────────────────── */
 
 /**
- * The Pages this person can act on, each with its own access token.
+ * Media fields requested on the media edge.
  *
- * `tasks` is the useful part and the reason it is requested: Facebook returns
- * what this user may actually do on each Page (CREATE_CONTENT, MANAGE,
- * MODERATE, ANALYZE). Without it the UI can only discover that someone lacks
- * publishing rights by letting them write a post and then failing — the
- * capability is knowable up front, so it should be known up front.
- *
- * Requires `pages_show_list`.
+ * `igGetFields` drops any Meta rejects, so an unavailable field costs that
+ * field rather than the whole request.
  */
-export async function listPages(userAccessToken) {
-    const data = await graph('me/accounts', {
-        accessToken: userAccessToken,
-        label: 'page list fetch',
-        params: {
-            fields: 'id,name,username,category,tasks,access_token,fan_count,followers_count,picture.type(large),link',
-            limit: 100,
-        },
-    });
-
-    return (data.data ?? []).map((page) => ({
-        id: String(page.id),
-        name: page.name,
-        username: page.username ?? null,
-        category: page.category ?? null,
-        tasks: Array.isArray(page.tasks) ? page.tasks : [],
-        accessToken: page.access_token ?? null,
-        followers: page.followers_count ?? page.fan_count ?? 0,
-        likes: page.fan_count ?? 0,
-        picture: page.picture?.data?.url ?? null,
-        link: page.link ?? null,
-    }));
-}
-
-/** Page-level detail and engagement counts. Requires `pages_read_engagement`. */
-export async function fetchPage(pageAccessToken, pageId) {
-    const data = await graph(String(pageId), {
-        accessToken: pageAccessToken,
-        label: 'page fetch',
-        params: {
-            fields: 'id,name,username,about,description,category,link,website,fan_count,followers_count,picture.type(large),cover',
-        },
-    });
-
-    return {
-        id: String(data.id),
-        name: data.name,
-        username: data.username ?? null,
-        about: data.about ?? null,
-        description: data.description ?? null,
-        category: data.category ?? null,
-        link: data.link ?? null,
-        website: data.website ?? null,
-        followers: data.followers_count ?? data.fan_count ?? 0,
-        likes: data.fan_count ?? 0,
-        picture: data.picture?.data?.url ?? null,
-        cover: data.cover?.source ?? null,
-    };
-}
-
-/** Recent Page posts with engagement summaries. Requires `pages_read_engagement`. */
-export async function fetchPagePosts(pageAccessToken, pageId, limit = 25) {
-    const data = await graph(`${pageId}/posts`, {
-        accessToken: pageAccessToken,
-        label: 'page posts fetch',
-        params: {
-            fields: 'id,message,created_time,permalink_url,full_picture,'
-                + 'reactions.summary(true).limit(0),comments.summary(true).limit(0),shares',
-            limit,
-        },
-    });
-
-    return (data.data ?? []).map((post) => ({
-        id: String(post.id),
-        message: post.message ?? '',
-        createdTime: post.created_time,
-        permalink: post.permalink_url ?? null,
-        image: post.full_picture ?? null,
-        reactions: post.reactions?.summary?.total_count ?? 0,
-        comments: post.comments?.summary?.total_count ?? 0,
-        shares: post.shares?.count ?? 0,
-    }));
-}
-
-/**
- * Publish to the Page. Requires `pages_manage_posts`.
- *
- * Posted with the **Page** access token, not the user token — a user token here
- * either fails or posts as the person rather than the Page.
- */
-export async function publishPost(pageAccessToken, pageId, { message, link } = {}) {
-    if (!message && !link) {
-        throw ApiError.badRequest('A post needs a message or a link.');
-    }
-
-    const data = await graph(`${pageId}/feed`, {
-        method: 'POST',
-        accessToken: pageAccessToken,
-        label: 'post publish',
-        body: { ...(message ? { message } : {}), ...(link ? { link } : {}) },
-    });
-
-    return { id: String(data.id) };
-}
-
-/** Remove a Page post. Requires `pages_manage_posts`. */
-export async function deletePost(pageAccessToken, postId) {
-    await graph(String(postId), {
-        method: 'DELETE', accessToken: pageAccessToken, label: 'post delete',
-    });
-    return { deleted: true };
-}
-
-/* ──────────────────────────── Comments ───────────────────────────────────── */
-
-/** Comments on a post. Requires `pages_read_engagement`. */
-export async function fetchComments(pageAccessToken, postId, limit = 50) {
-    const data = await graph(`${postId}/comments`, {
-        accessToken: pageAccessToken,
-        label: 'comments fetch',
-        params: {
-            fields: 'id,message,created_time,from{id,name},like_count,comment_count,is_hidden',
-            limit,
-            order: 'reverse_chronological',
-        },
-    });
-
-    return (data.data ?? []).map((c) => ({
-        id: String(c.id),
-        message: c.message ?? '',
-        createdTime: c.created_time,
-        authorName: c.from?.name ?? 'Facebook user',
-        authorId: c.from?.id ?? null,
-        likes: c.like_count ?? 0,
-        replies: c.comment_count ?? 0,
-        hidden: Boolean(c.is_hidden),
-    }));
-}
-
-/** Reply to a comment as the Page. Requires `pages_manage_engagement`. */
-export async function replyToComment(pageAccessToken, commentId, message) {
-    if (!message?.trim()) throw ApiError.badRequest('A reply needs a message.');
-
-    const data = await graph(`${commentId}/comments`, {
-        method: 'POST', accessToken: pageAccessToken, label: 'comment reply',
-        body: { message },
-    });
-    return { id: String(data.id) };
-}
-
-/**
- * Hide or unhide a comment. Requires `pages_manage_engagement`.
- *
- * Hiding is preferred to deleting for moderation: it removes the comment from
- * public view without destroying it, so a moderation decision stays reversible.
- */
-export async function setCommentHidden(pageAccessToken, commentId, hidden = true) {
-    await graph(String(commentId), {
-        method: 'POST', accessToken: pageAccessToken, label: 'comment moderation',
-        body: { is_hidden: hidden ? 'true' : 'false' },
-    });
-    return { hidden };
-}
-
-/** Delete a comment. Requires `pages_manage_engagement`. */
-export async function deleteComment(pageAccessToken, commentId) {
-    await graph(String(commentId), {
-        method: 'DELETE', accessToken: pageAccessToken, label: 'comment delete',
-    });
-    return { deleted: true };
-}
-
-/* ─────────────────────────── Page insights ───────────────────────────────── */
-
-/**
- * Page insight metrics, in preference order.
- *
- * Facebook retires Page metrics regularly and without a redirect — the
- * `page_engaged_users` family and several `page_views_*` metrics have all been
- * removed or narrowed across recent versions. As with Instagram, one retired
- * name in a comma-separated `metric=` list fails the entire request, so these
- * go through discovery rather than being trusted: whatever this Page and Graph
- * version still serve comes back, the rest are reported unavailable.
- *
- * Requires `read_insights`, which is separate from `pages_read_engagement` —
- * engagement reads content, insights reads analytics, and having one does not
- * grant the other.
- */
-export const PAGE_METRICS = [
-    'page_impressions_unique',
-    'page_impressions',
-    'page_post_engagements',
-    'page_fans',
-    'page_fan_adds',
-    'page_fan_removes',
-    'page_views_total',
-    'page_video_views',
+const MEDIA_FIELDS = [
+  'id', 'caption', 'media_type', 'media_product_type', 'media_url',
+  'thumbnail_url', 'permalink', 'timestamp', 'like_count', 'comments_count',
 ];
 
 /**
- * Page-level insights for the last `days` days.
+ * The connected account's media — posts, reels and carousels.
  *
- * @returns the normalised shape — every metric either carries a value or is
- *          explicitly marked unavailable, never silently zero.
+ * Reels arrive on this same edge, distinguished by `media_product_type: REELS`
+ * rather than a separate endpoint. Stories are not here: they live on a
+ * different edge, expire in 24 hours, and nothing in Marqueiver displays them,
+ * so they are not fetched.
  */
-export async function fetchPageInsights(pageAccessToken, pageId, { days = 28 } = {}) {
-    const since = Math.floor((Date.now() - days * 86_400_000) / 1000);
-    const until = Math.floor(Date.now() / 1000);
+export async function fetchMedia(accessToken, igUserId, limit = 25) {
+  if (!isLiveMode() || String(accessToken).startsWith('mock_token_')) {
+    const seed = hash(accessToken);
+    return Array.from({ length: 6 }, (_, i) => ({
+      id: `mock_media_${seed}_${i}`,
+      caption: `Mock post ${i + 1}`,
+      media_type: i % 3 === 0 ? 'VIDEO' : 'IMAGE',
+      media_product_type: i % 3 === 0 ? 'REELS' : 'FEED',
+      permalink: 'https://instagram.com/p/mock',
+      timestamp: new Date(Date.now() - i * 86_400_000).toISOString(),
+      like_count: 100 + ((seed + i * 37) % 5000),
+      comments_count: (seed + i) % 300,
+    }));
+  }
 
-    const { data, unavailable } = await requestSupportedMetrics(
-        PAGE_METRICS,
-        (metrics) => graph(`${pageId}/insights`, {
-            accessToken: pageAccessToken,
-            label: 'page insights fetch',
-            params: { metric: metrics.join(','), period: 'day', since, until },
-        }),
-        {
-            onDrop: ({ dropped, remaining }) => logger.warn(
-                'Facebook Page insights: metric not supported, retrying without it.',
-                { dropped, remaining: remaining.length },
-            ),
-        },
-    );
+  const data = await igGetFields(
+    `${igUserId}/media`, MEDIA_FIELDS, accessToken, 'media fetch',
+    { limit: Math.min(limit, 100) },
+  );
 
-    return normaliseInsights(data?.data, unavailable);
+  return Array.isArray(data?.data) ? data.data : [];
 }
 
-/** Whether Facebook is configured well enough to attempt live OAuth. */
-export function facebookConfigStatus() {
-    const missing = [];
-    if (!env.facebook.appId) missing.push('FACEBOOK_APP_ID');
-    if (!env.facebook.appSecret) missing.push('FACEBOOK_APP_SECRET');
-    if (!env.facebook.redirectUri) missing.push('FACEBOOK_REDIRECT_URI');
+/**
+ * Account-level insight metrics, in preference order.
+ *
+ * Verified against Meta's Instagram User insights reference rather than
+ * carried over: the previous implementation asked for `follower_count` and
+ * `media_count`, which are media-edge *fields*, not account insight metrics —
+ * it would have failed on every call had anything ever reached it.
+ *
+ * `impressions` is deliberately absent. Meta's reference states it was
+ * deprecated in v22.0 and removed for all versions on 21 April 2025, replaced
+ * by `views`. A second Meta page still lists `impressions`; discovery is what
+ * makes that contradiction survivable either way.
+ */
+export const ACCOUNT_METRICS = [
+  'reach',
+  'views',
+  'total_interactions',
+  'likes',
+  'comments',
+  'shares',
+  'saves',
+  'replies',
+  'follows_and_unfollows',
+  'profile_links_taps',
+  'accounts_engaged',
+];
 
-    return {
-        configured: missing.length === 0,
-        missing,                       // variable NAMES only, never values
-        loginForBusiness: usesLoginForBusiness(),
-        graphVersion: GRAPH_VERSION,
-        scopes: usesLoginForBusiness() ? null : REQUIRED_SCOPES,
-    };
+/**
+ * Account-level insights for the last `days` days.
+ *
+ * Returns the normalised shape — every metric either has a value or is marked
+ * unavailable — so a metric Meta refused never renders as a zero.
+ */
+export async function fetchAccountInsights(accessToken, igUserId, { days = 28 } = {}) {
+  if (!isLiveMode() || String(accessToken).startsWith('mock_token_')) {
+    const seed = hash(accessToken);
+    return normaliseInsights(ACCOUNT_METRICS.slice(0, 6).map((name, i) => ({
+      name, period: 'day', total_value: { value: 500 + ((seed + i * 91) % 20000) },
+    })), ACCOUNT_METRICS.slice(6));
+  }
+
+  const since = Math.floor((Date.now() - days * 86_400_000) / 1000);
+  const until = Math.floor(Date.now() / 1000);
+
+  const { data, unavailable } = await requestSupportedMetrics(
+    ACCOUNT_METRICS,
+    (metrics) => igGet(`${igUserId}/insights`, {
+      metric: metrics.join(','),
+      metric_type: 'total_value',
+      period: 'day',
+      since,
+      until,
+      access_token: accessToken,
+    }, 'account insights fetch'),
+    {
+      onDrop: ({ dropped, remaining }) => logger.warn(
+        'Instagram account insights: metric not supported, retrying without it.',
+        { dropped, remaining: remaining.length },
+      ),
+    },
+  );
+
+  return normaliseInsights(data?.data, unavailable);
+}
+
+/**
+ * Per-media insight metrics.
+ *
+ * Meta's media-level reference 404s and its Insights guide is visibly stale
+ * (it still presents `impressions` and `engagement`), so unlike the account
+ * list these names are NOT verified against current documentation. That is
+ * precisely why they go through discovery: whichever of them this account and
+ * Graph version actually serve will come back, and the rest are reported
+ * unavailable instead of failing the request.
+ */
+export const MEDIA_METRICS = [
+  'reach', 'views', 'likes', 'comments', 'shares', 'saved', 'total_interactions',
+];
+
+export async function fetchMediaInsights(accessToken, mediaId) {
+  if (!isLiveMode() || String(accessToken).startsWith('mock_token_')) {
+    const seed = hash(mediaId);
+    return normaliseInsights(
+      MEDIA_METRICS.slice(0, 4).map((name, i) => ({ name, total_value: { value: (seed + i * 13) % 9000 } })),
+      MEDIA_METRICS.slice(4),
+    );
+  }
+
+  const { data, unavailable } = await requestSupportedMetrics(
+    MEDIA_METRICS,
+    (metrics) => igGet(`${mediaId}/insights`, {
+      metric: metrics.join(','),
+      access_token: accessToken,
+    }, 'media insights fetch'),
+    {
+      onDrop: ({ dropped }) => logger.warn(
+        'Instagram media insights: metric not supported, retrying without it.', { dropped },
+      ),
+    },
+  );
+
+  return normaliseInsights(data?.data, unavailable);
+}
+
+/**
+ * Backwards-compatible alias.
+ *
+ * `fetchInsights` was exported and never called from anywhere — dead code whose
+ * existence made `instagram_business_manage_insights` look used when nothing
+ * reached it. Kept as a thin alias so any caller added since keeps working.
+ */
+export const fetchInsights = fetchAccountInsights;
+
+/**
+ * Generate OAuth state.
+ */
+export function newState() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
+/**
+ * Simple deterministic hash for mock data.
+ */
+function hash(s) {
+  return [...String(s)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
 }
