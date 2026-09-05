@@ -358,8 +358,6 @@ async function igGetFieldsFromNodes(nodes, fields, accessToken, label) {
  */
 export function buildAuthUrl(state) {
   const redirectUri = env.instagram.redirectUri;
-    console.log('[Instagram OAuth] App ID being sent:', env.instagram.appId);
-console.log('[Instagram OAuth] Redirect URI:', env.instagram.redirectUri);
 
   // Mock mode
   if (!isLiveMode()) {
@@ -378,7 +376,6 @@ console.log('[Instagram OAuth] Redirect URI:', env.instagram.redirectUri);
   });
 
   return `${IG_AUTHORIZE}?${params.toString()}`;
-
 }
 
 /**
@@ -615,13 +612,27 @@ export async function fetchProfile(accessToken, igUserId) {
    * `me` is. An Instagram User access token *is* the identity, so the node
    * needs no id at all, and the response carries `id` and `user_id` anyway.
    *
-   * Note this does not add a request: the profile fetch is one call either way,
-   * and it is the same call that was already being made — only the node
-   * changes. The id from the token is still used, as the second candidate and
-   * as the value persisted, so nothing is lost if `me` is ever refused.
+   * ── Why the id fallback is gone ────────────────────────────────────────────
+   * It was kept as a second candidate on the theory that it might work if `me`
+   * were ever refused. Production settled that: the diagnostics probe reported
+   *
+   *   endpoint: 'https://graph.instagram.com/28127701113565244'  → 400, code 100
+   *
+   * and that id is the tell. Instagram professional account ids sit in the
+   * 17841… range; `2812770…` is the **app-scoped** id, which is what the token
+   * response's `user_id` field carries under Instagram Login. An app-scoped id
+   * identifies the account to this app and is not a Graph node — so this
+   * request could never have succeeded for any token, version or field list.
+   *
+   * Keeping it cost more than the nothing it bought: every profile failure
+   * produced two errors instead of one, the second one a guaranteed failure
+   * that looked like corroborating evidence, and it made a version problem
+   * read like a node problem. One node, one request, one honest error.
+   *
+   * The professional account id still reaches the database — it comes back
+   * inside this response as `user_id`, which is read below.
    */
-  const nodes = ['me', igUserId ? String(igUserId) : null].filter(Boolean);
-  const p = await igGetFieldsFromNodes(nodes, FIELDS, accessToken, 'profile fetch');
+  const p = await igGetFieldsFromNodes(['me'], FIELDS, accessToken, 'profile fetch');
 
   return {
     id: String(p.user_id ?? p.id ?? igUserId),

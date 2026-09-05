@@ -469,24 +469,52 @@ test('the profile is read from the `me` node, in a single request', async () => 
     assert.equal(saved.doc.status, 'connected');
 });
 
-test('the exact production rejection on `me` falls back to the id node', async () => {
-    // If a future app configuration refuses `me`, the id from the token is
-    // still there to address the node with — the connection degrades to the old
-    // behaviour rather than failing.
-    const { redirect, saved, graphReads } = await runCallback({
+test('the app-scoped id from the token is never requested as a node', async () => {
+    /**
+     * Production settled this one:
+     *   endpoint: 'https://graph.instagram.com/28127701113565244' → 400, code 100
+     *
+     * Instagram professional account ids sit in the 17841… range; `2812770…` is
+     * the APP-SCOPED id, which is what the token response's `user_id` carries
+     * under Instagram Login. It identifies the account to this app and is not a
+     * Graph node, so that request could never succeed — for any token, version
+     * or field list.
+     *
+     * It used to be tried as a fallback, which meant every profile failure
+     * produced two errors instead of one, the second a guaranteed failure that
+     * read like corroboration and made a version problem look like a node
+     * problem.
+     */
+    const APP_SCOPED = '28127701113565244';
+
+    const { graphReads } = await runCallback({
         handler: (url) => {
-            if (url.host === 'api.instagram.com') return { json: { data: [{ access_token: 'SHORT', user_id: 178414 }] } };
+            if (url.host === 'api.instagram.com') return { json: { data: [{ access_token: 'SHORT', user_id: APP_SCOPED }] } };
             if (node(url.pathname) === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
-            if (node(url.pathname) === '/me') {
-                return { status: 400, json: { error: { message: 'Unsupported request - method type: get', type: 'IGApiException', code: 100 } } };
-            }
-            return { json: profileJson({ user_id: '178414' }) };
+            return { json: profileJson({ user_id: '17841400000000000' }) };
         },
     });
 
-    assert.deepEqual(nodesOf(graphReads), ['/me', '/178414'], 'it must try me, then the id');
-    assert.equal(redirect.searchParams.get('ig'), 'connected');
-    assert.equal(saved.doc.igUserId, '178414');
+    assert.ok(
+        !graphReads.some((p) => p.includes(APP_SCOPED)),
+        `the app-scoped id must never be a node: ${graphReads.join(', ')}`,
+    );
+    assert.deepEqual(nodesOf(graphReads), ['/me'], 'one node, one request');
+});
+
+test('the professional account id comes back inside the /me response', async () => {
+    // Removing the id fallback must not lose the id: the real professional
+    // account id (17841…) is a FIELD on the me node, not a path segment.
+    const { saved } = await runCallback({
+        handler: (url) => {
+            if (url.host === 'api.instagram.com') return { json: { data: [{ access_token: 'SHORT', user_id: '28127701113565244' }] } };
+            if (node(url.pathname) === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
+            return { json: profileJson({ user_id: '17841400000000000' }) };
+        },
+    });
+
+    assert.equal(saved.doc.igUserId, '17841400000000000',
+        'the stored id must be the professional account id, not the app-scoped one');
 });
 
 test('a token response with no user_id still connects, using `me` alone', async () => {
