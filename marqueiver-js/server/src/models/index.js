@@ -12,7 +12,7 @@ export { Otp } from './Otp.js';
 export { InstagramAccount } from './InstagramAccount.js';
 export { User } from './User.js';
 export { CreatorProfile } from './CreatorProfile.js';
-
+export { InstagramMedia } from './InstagramMedia.js';
 export { YouTubeChannel } from './YoutubeChannel.js';
 export { FacebookPage } from './FacebookPage.js';
 export { SavedCreator } from './SavedCreator.js';

@@ -39,12 +39,23 @@ router.get(
   c.getInstagramProfile
 );
 
-// FR-4.7 — on-demand sync
-router.post(
-  '/instagram/sync',
-  authenticate,
-  c.syncInstagram
-);
+/**
+ * FR-4.7 — Sync Now.
+ *
+ * Refreshes profile, media, engagement and insights in one run. Rate-limited
+ * separately and harder than the read endpoints: each sync makes up to a dozen
+ * Meta calls, so an impatient double-click is a meaningful share of the app's
+ * rate-limit budget.
+ */
+const syncLimiter = rateLimit({
+  windowMs: 60_000, max: 6, standardHeaders: true, legacyHeaders: false,
+});
+
+router.post('/instagram/sync', authenticate, syncLimiter, c.syncInstagramNow);
+
+// Content and analytics, served from the last sync.
+router.get('/instagram/media', authenticate, c.listInstagramMedia);
+router.get('/instagram/insights', authenticate, c.getInstagramInsights);
 
 // Disconnect Instagram from Marqueiver
 router.delete(
