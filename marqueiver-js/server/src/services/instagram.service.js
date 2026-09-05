@@ -670,11 +670,15 @@ export async function fetchProfile(accessToken, igUserId) {
  * because `/access_token` is not a node. Something about the host and token
  * pairing is wrong, and guessing a fourth endpoint would be the fourth guess.
  *
- * Meta can answer this directly. `debug_token` reports which app issued the
- * token, its type and its scopes; trying the equivalent read on
- * `graph.facebook.com` establishes which API generation the token belongs to —
- * Instagram Login tokens work only on graph.instagram.com, Facebook Login
- * tokens only on graph.facebook.com. One run distinguishes them.
+ * Trying the equivalent read on `graph.facebook.com` establishes which API
+ * generation the token belongs to — Instagram Login tokens work only on
+ * graph.instagram.com, Facebook Login tokens only on graph.facebook.com.
+ *
+ * The permissions Instagram actually granted are the other half of the answer,
+ * and those are logged at `inspectTokenGrant` during the token exchange. An
+ * empty `grantedPermissions` array with a successful OAuth is the signature of
+ * a permission that has not cleared App Review: the consent screen renders, the
+ * token issues, and nothing is authorised.
  *
  * This is a diagnostic, not a fallback. It runs only when a profile read has
  * already failed, only when INSTAGRAM_DIAGNOSTICS=1, it changes no behaviour,
@@ -718,15 +722,24 @@ export async function diagnoseInstagramToken(accessToken, igUserId) {
     }
   };
 
-  // 1. What does Meta say this token IS? App id, type, scopes, expiry.
-  //    Needs an app access token, which is `{app-id}|{app-secret}` — built here
-  //    and never logged.
-  if (env.instagram.appId && env.instagram.appSecret) {
-    await probe('debug_token', 'https://graph.facebook.com/debug_token', {
-      input_token: accessToken,
-      access_token: `${env.instagram.appId}|${env.instagram.appSecret}`,
-    });
-  }
+  /**
+   * The `debug_token` probe has been removed.
+   *
+   * It was meant to answer "which app issued this token", but it is a
+   * graph.facebook.com endpoint and cannot parse an Instagram User access
+   * token. Against this flow it returns
+   *
+   *   code 190 — Invalid OAuth access token - Cannot parse access token
+   *
+   * which reads exactly like "your token is invalid" and is nothing of the
+   * kind: it means the wrong debugger was asked. A probe that returns a
+   * false alarm is worse than no probe, because it sends the next hour of
+   * debugging after a token that is fine.
+   *
+   * The token's own metadata — prefix, length, and the permissions Instagram
+   * actually granted — is logged at `inspectTokenGrant` during the exchange,
+   * which is the honest answer to the same question.
+   */
 
   // 2. The read that is failing, so its exact response sits beside the others.
   await probe('instagram-host /me', `${IG_GRAPH_HOST}/me`, {
