@@ -86,11 +86,15 @@ export function isLiveMode() {
  * host later stops accepting should degrade to a logged warning rather than to
  * the outage this file just had.
  */
-export function graphCandidates(path, version = env.instagram.graphVersion) {
+// export function graphCandidates(path, version = env.instagram.graphVersion) {
+//   const clean = String(path).replace(/^\/+/, '');
+//   const unversioned = `${IG_GRAPH_HOST}/${clean}`;
+//   if (!version) return [unversioned];
+//   return [`${IG_GRAPH_HOST}/${version}/${clean}`, unversioned];
+// }
+export function graphCandidates(path) {
   const clean = String(path).replace(/^\/+/, '');
-  const unversioned = `${IG_GRAPH_HOST}/${clean}`;
-  if (!version) return [unversioned];
-  return [`${IG_GRAPH_HOST}/${version}/${clean}`, unversioned];
+  return [`${IG_GRAPH_HOST}/${clean}`];
 }
 
 /**
@@ -600,7 +604,14 @@ export async function fetchMe(accessToken, igUserId) {
     };
   }
 
-  const p = await igGetFields('me', ['user_id', 'username'], accessToken, '/me fetch');
+//   const p = await igGetFields('me', ['user_id', 'username'], accessToken, '/me fetch');
+const p = await igGetFields(
+  'me',
+  ['id', 'username'],
+  accessToken,
+  '/me fetch'
+);
+
 
   const id = p.user_id ?? p.id;
   if (!id) {
@@ -634,12 +645,12 @@ export async function fetchProfile(accessToken, igUserId) {
     };
   }
 
-  const FIELDS = [
-    'id', 'user_id', 'username', 'name', 'profile_picture_url',
-    'followers_count', 'follows_count', 'media_count',
-    'account_type', 'biography', 'website',
-  ];
-
+//   const FIELDS = [
+//     'id', 'user_id', 'username', 'name', 'profile_picture_url',
+//     'followers_count', 'follows_count', 'media_count',
+//     'account_type', 'biography', 'website',
+//   ];
+const FIELDS = ['id', 'username'];
   /**
    * Which node to read the profile from.
    *
@@ -680,29 +691,33 @@ export async function fetchProfile(accessToken, igUserId) {
    * The professional account id still reaches the database — it comes back
    * inside this response as `user_id`, which is read below.
    */
-  const p = await igGetFieldsFromNodes(['me'], FIELDS, accessToken, 'profile fetch');
-
-  return {
-    id: String(p.user_id ?? p.id ?? igUserId),
-    username: p.username,
-    name: p.name || p.username,
-    profile_picture_url: p.profile_picture_url,
-    biography: p.biography,
-    followers_count: p.followers_count,
-    follows_count: p.follows_count,
-    media_count: p.media_count,
-    /**
-     * Left undefined rather than defaulted when Instagram does not return it.
-     * The old `|| 'BUSINESS'` meant an account whose type we never learned was
-     * recorded as eligible — the eligibility gate could not fail, because its
-     * input was manufactured. `assertInstagramEligible` decides what an absent
-     * type means; this function's job is to report what Instagram said.
-     */
-    account_type: p.account_type ? String(p.account_type).toUpperCase() : undefined,
-    is_verified: p.is_verified || false,
-    website: p.website,
-    dataSource: 'connected',
-  };
+//   const p = await igGetFieldsFromNodes(['me'], FIELDS, accessToken, 'profile fetch');
+const p = await igGetFields('me', FIELDS, accessToken, 'profile fetch');
+//   return {
+//     id: String(p.user_id ?? p.id ?? igUserId),
+//     username: p.username,
+//     name: p.name || p.username,
+//     profile_picture_url: p.profile_picture_url,
+//     biography: p.biography,
+//     followers_count: p.followers_count,
+//     follows_count: p.follows_count,
+//     media_count: p.media_count,
+//     /**
+//      * Left undefined rather than defaulted when Instagram does not return it.
+//      * The old `|| 'BUSINESS'` meant an account whose type we never learned was
+//      * recorded as eligible — the eligibility gate could not fail, because its
+//      * input was manufactured. `assertInstagramEligible` decides what an absent
+//      * type means; this function's job is to report what Instagram said.
+//      */
+//     account_type: p.account_type ? String(p.account_type).toUpperCase() : undefined,
+//     is_verified: p.is_verified || false,
+//     website: p.website,
+//     dataSource: 'connected',
+//   };
+return {
+  id: String(p.id ?? p.user_id ?? igUserId),
+  username: p.username,
+};
 }
 
 /* ────────────────────────────── diagnostics ──────────────────────────────── */
