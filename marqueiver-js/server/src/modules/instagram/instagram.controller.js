@@ -4,7 +4,8 @@ import { ok } from '../../utils/respond.js';
 import { env } from '../../config/env.js';
 import { logger } from '../../config/logger.js';
 import { verifyAccess } from '../../utils/tokens.js';
-import { InstagramAccount, CreatorProfile, User } from '../../models/index.js';
+import { InstagramAccount, InstagramMedia, CreatorProfile, User } from '../../models/index.js';
+import { syncInstagram } from '../../services/socialSync.service.js';
 import * as instagramService from '../../services/instagram.service.js';
 import { describeError, userFacingMessage } from '../../utils/describeError.js';
 
@@ -286,6 +287,70 @@ export const instagramCallback = catchAsync(async (req, res) => {
   }
 });
 
+/**
+ * Sync Now — refresh profile, media, engagement and insights.
+ *
+ * Returns the sync report alongside the account, so the UI can say which parts
+ * are fresh and which could not be refreshed rather than presenting stale
+ * numbers as current. A partial sync is a 200 with `partial: true`, not an
+ * error: the parts that did refresh are real and worth showing.
+ */
+export const syncInstagramNow = catchAsync(async (req, res) => {
+  const account = await InstagramAccount.findOne({ user: req.auth.sub }).select('+accessToken');
+  if (!account) throw ApiError.notFound('No Instagram account connected');
+
+  const report = await syncInstagram(account, { mediaLimit: 25 });
+
+  if (report.requiresReconnect) {
+    throw new ApiError(401, 'INSTAGRAM_TOKEN_INVALID',
+      'Your Instagram authorisation has expired — please reconnect.',
+      { platform: 'instagram', action: 'reconnect' });
+  }
+
+  const view = account.toObject();
+  delete view.accessToken;
+  ok(res, { account: view, sync: report });
+});
+
+/** The connected account's media, newest first. */
+export const listInstagramMedia = catchAsync(async (req, res) => {
+  const account = await InstagramAccount.findOne({ user: req.auth.sub }).select('_id');
+  if (!account) throw ApiError.notFound('No Instagram account connected');
+
+  const limit = Math.min(Number(req.query.limit) || 25, 100);
+  const media = await InstagramMedia.find({ account: account._id })
+    .sort({ timestamp: -1 }).limit(limit).lean();
+
+  ok(res, media);
+});
+
+/**
+ * Account-level analytics.
+ *
+ * Served from the last sync rather than fetched live: an analytics page that
+ * calls Meta on every render burns the app's rate-limit budget on repeat views
+ * of the same numbers. `syncedAt` is returned so the UI can show how fresh the
+ * figures are and offer Sync Now when they are not.
+ */
+export const getInstagramInsights = catchAsync(async (req, res) => {
+  const account = await InstagramAccount.findOne({ user: req.auth.sub })
+    .select('insights lastSyncedAt followers following mediaCount username accountType').lean();
+
+  if (!account) throw ApiError.notFound('No Instagram account connected');
+
+  ok(res, {
+    username: account.username,
+    accountType: account.accountType,
+    followers: account.followers ?? null,
+    following: account.following ?? null,
+    mediaCount: account.mediaCount ?? null,
+    // Each metric is { available, value } — an unavailable metric is never a
+    // zero, so the UI can render "Not available from Meta API" honestly.
+    metrics: account.insights ?? {},
+    syncedAt: account.lastSyncedAt ?? null,
+  });
+});
+
 /** FR-5 — return the connected profile (token never included). */
 export const getInstagramProfile = catchAsync(async (req, res) => {
   const account = await InstagramAccount.findOne({ user: req.auth.sub }).lean();
@@ -323,38 +388,17 @@ export const disconnectInstagram = catchAsync(async (req, res) => {
   ok(res, { message: 'Instagram disconnected successfully' });
 });
 
-/** FR-4.7 — on-demand refresh of profile data. */
-export const syncInstagram = catchAsync(async (req, res) => {
-  const account = await InstagramAccount.findOne({ user: req.auth.sub }).select('+accessToken');
-  if (!account) throw ApiError.notFound('No Instagram account connected');
-  if (account.status !== 'connected') throw ApiError.badRequest('Instagram account is not connected');
-
-  try {
-    const profile = await instagramService.fetchProfile(account.accessToken, account.igUserId);
-
-    const updated = await persistProfile(req.auth.sub, {
-      access_token: account.accessToken,
-      tokenType: account.tokenType,
-      expires_in: account.tokenExpiresAt
-        ? Math.floor((account.tokenExpiresAt - new Date()) / 1000)
-        : 3600,
-      scopes: account.scopes,
-    }, profile);
-
-    const view = updated.toObject();
-    delete view.accessToken;
-
-    ok(res, view);
-  } catch (e) {
-    // FR §8 — token expired/revoked or IG API unavailable.
-    if (/expired|revoked|401|403/i.test(e.message)) {
-      account.status = 'expired';
-      await account.save();
-      throw ApiError.unauthorized('Instagram authorization expired — please reconnect');
-    }
-    throw new ApiError(502, 'IG_SYNC_FAILED', 'Instagram is unavailable right now — try again shortly');
-  }
-});
+/**
+ * The old profile-only sync lived here and has been replaced by
+ * `syncInstagramNow` above, which goes through socialSync.service.js.
+ *
+ * Two reasons rather than one. It refreshed only the profile — no media, no
+ * insights — so "Sync Now" left the analytics page as stale as it found it. And
+ * it classified failures by regex over the error message (`/expired|revoked|
+ * 401|403/`), which reads whatever text the provider happened to send: an
+ * unrelated error mentioning "403" marked a healthy account expired, and a real
+ * expiry phrased differently did not. The replacement matches on error codes.
+ */
 
 // Redirect back to the frontend with a result flag the SPA can react to.
 function redirectResult(res, success, message) {

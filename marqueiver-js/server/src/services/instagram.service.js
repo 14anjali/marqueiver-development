@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import { ApiError } from '../utils/apiError.js';
+import { requestSupportedMetrics, normaliseInsights } from '../utils/metricDiscovery.js';
 
 /**
  * Instagram OAuth + Graph integration — **Instagram API with Instagram Login**
@@ -234,12 +235,16 @@ async function igGet(path, params, label) {
  * Bounded by the number of fields, and each drop is logged so a permanently
  * absent field gets noticed rather than silently tolerated forever.
  */
-async function igGetFields(path, fields, accessToken, label) {
+async function igGetFields(path, fields, accessToken, label, extraParams = {}) {
   let remaining = [...fields];
 
   for (let attempt = 0; attempt < fields.length; attempt += 1) {
     try {
-      return await igGet(path, { fields: remaining.join(','), access_token: accessToken }, label);
+      return await igGet(path, {
+        ...extraParams,
+        fields: remaining.join(','),
+        access_token: accessToken,
+      }, label);
     } catch (err) {
       const dropped = nonexistentField({
         error: { message: err.details?.providerMessage ?? err.message },
@@ -568,32 +573,162 @@ export async function fetchProfile(accessToken, igUserId) {
   };
 }
 
+/* ─────────────────────────── media & insights ────────────────────────────── */
+
 /**
- * Fetch Instagram insights. Optional — a failure here must not fail a connection.
+ * Media fields requested on the media edge.
+ *
+ * `igGetFields` drops any Meta rejects, so an unavailable field costs that
+ * field rather than the whole request.
  */
-export async function fetchInsights(
-  accessToken,
-  igUserId,
-  metricNames = ['follower_count', 'media_count'],
-) {
+const MEDIA_FIELDS = [
+  'id', 'caption', 'media_type', 'media_product_type', 'media_url',
+  'thumbnail_url', 'permalink', 'timestamp', 'like_count', 'comments_count',
+];
+
+/**
+ * The connected account's media — posts, reels and carousels.
+ *
+ * Reels arrive on this same edge, distinguished by `media_product_type: REELS`
+ * rather than a separate endpoint. Stories are not here: they live on a
+ * different edge, expire in 24 hours, and nothing in Marqueiver displays them,
+ * so they are not fetched.
+ */
+export async function fetchMedia(accessToken, igUserId, limit = 25) {
   if (!isLiveMode() || String(accessToken).startsWith('mock_token_')) {
-    return {
-      follower_count: { value: 10000 },
-      media_count: { value: 150 },
-    };
+    const seed = hash(accessToken);
+    return Array.from({ length: 6 }, (_, i) => ({
+      id: `mock_media_${seed}_${i}`,
+      caption: `Mock post ${i + 1}`,
+      media_type: i % 3 === 0 ? 'VIDEO' : 'IMAGE',
+      media_product_type: i % 3 === 0 ? 'REELS' : 'FEED',
+      permalink: 'https://instagram.com/p/mock',
+      timestamp: new Date(Date.now() - i * 86_400_000).toISOString(),
+      like_count: 100 + ((seed + i * 37) % 5000),
+      comments_count: (seed + i) % 300,
+    }));
   }
 
-  try {
-    const data = await igGet(`${igUserId}/insights`, {
-      metric: metricNames.join(','),
-      access_token: accessToken,
-    }, 'insights fetch');
-    return data.data;
-  } catch (e) {
-    logger.warn('Instagram insights fetch failed', { error: e.message });
-    return null;
-  }
+  const data = await igGetFields(
+    `${igUserId}/media`, MEDIA_FIELDS, accessToken, 'media fetch',
+    { limit: Math.min(limit, 100) },
+  );
+
+  return Array.isArray(data?.data) ? data.data : [];
 }
+
+/**
+ * Account-level insight metrics, in preference order.
+ *
+ * Verified against Meta's Instagram User insights reference rather than
+ * carried over: the previous implementation asked for `follower_count` and
+ * `media_count`, which are media-edge *fields*, not account insight metrics —
+ * it would have failed on every call had anything ever reached it.
+ *
+ * `impressions` is deliberately absent. Meta's reference states it was
+ * deprecated in v22.0 and removed for all versions on 21 April 2025, replaced
+ * by `views`. A second Meta page still lists `impressions`; discovery is what
+ * makes that contradiction survivable either way.
+ */
+export const ACCOUNT_METRICS = [
+  'reach',
+  'views',
+  'total_interactions',
+  'likes',
+  'comments',
+  'shares',
+  'saves',
+  'replies',
+  'follows_and_unfollows',
+  'profile_links_taps',
+  'accounts_engaged',
+];
+
+/**
+ * Account-level insights for the last `days` days.
+ *
+ * Returns the normalised shape — every metric either has a value or is marked
+ * unavailable — so a metric Meta refused never renders as a zero.
+ */
+export async function fetchAccountInsights(accessToken, igUserId, { days = 28 } = {}) {
+  if (!isLiveMode() || String(accessToken).startsWith('mock_token_')) {
+    const seed = hash(accessToken);
+    return normaliseInsights(ACCOUNT_METRICS.slice(0, 6).map((name, i) => ({
+      name, period: 'day', total_value: { value: 500 + ((seed + i * 91) % 20000) },
+    })), ACCOUNT_METRICS.slice(6));
+  }
+
+  const since = Math.floor((Date.now() - days * 86_400_000) / 1000);
+  const until = Math.floor(Date.now() / 1000);
+
+  const { data, unavailable } = await requestSupportedMetrics(
+    ACCOUNT_METRICS,
+    (metrics) => igGet(`${igUserId}/insights`, {
+      metric: metrics.join(','),
+      metric_type: 'total_value',
+      period: 'day',
+      since,
+      until,
+      access_token: accessToken,
+    }, 'account insights fetch'),
+    {
+      onDrop: ({ dropped, remaining }) => logger.warn(
+        'Instagram account insights: metric not supported, retrying without it.',
+        { dropped, remaining: remaining.length },
+      ),
+    },
+  );
+
+  return normaliseInsights(data?.data, unavailable);
+}
+
+/**
+ * Per-media insight metrics.
+ *
+ * Meta's media-level reference 404s and its Insights guide is visibly stale
+ * (it still presents `impressions` and `engagement`), so unlike the account
+ * list these names are NOT verified against current documentation. That is
+ * precisely why they go through discovery: whichever of them this account and
+ * Graph version actually serve will come back, and the rest are reported
+ * unavailable instead of failing the request.
+ */
+export const MEDIA_METRICS = [
+  'reach', 'views', 'likes', 'comments', 'shares', 'saved', 'total_interactions',
+];
+
+export async function fetchMediaInsights(accessToken, mediaId) {
+  if (!isLiveMode() || String(accessToken).startsWith('mock_token_')) {
+    const seed = hash(mediaId);
+    return normaliseInsights(
+      MEDIA_METRICS.slice(0, 4).map((name, i) => ({ name, total_value: { value: (seed + i * 13) % 9000 } })),
+      MEDIA_METRICS.slice(4),
+    );
+  }
+
+  const { data, unavailable } = await requestSupportedMetrics(
+    MEDIA_METRICS,
+    (metrics) => igGet(`${mediaId}/insights`, {
+      metric: metrics.join(','),
+      access_token: accessToken,
+    }, 'media insights fetch'),
+    {
+      onDrop: ({ dropped }) => logger.warn(
+        'Instagram media insights: metric not supported, retrying without it.', { dropped },
+      ),
+    },
+  );
+
+  return normaliseInsights(data?.data, unavailable);
+}
+
+/**
+ * Backwards-compatible alias.
+ *
+ * `fetchInsights` was exported and never called from anywhere — dead code whose
+ * existence made `instagram_business_manage_insights` look used when nothing
+ * reached it. Kept as a thin alias so any caller added since keeps working.
+ */
+export const fetchInsights = fetchAccountInsights;
 
 /**
  * Generate OAuth state.
