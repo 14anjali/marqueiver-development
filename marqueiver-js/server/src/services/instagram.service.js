@@ -374,10 +374,10 @@ export function buildAuthUrl(state) {
     response_type: 'code',
     state,
   });
-
-  return `${IG_AUTHORIZE}?${params.toString()}`;
   console.log('[Instagram OAuth] App ID being sent:', env.instagram.appId);
 console.log('[Instagram OAuth] Redirect URI:', env.instagram.redirectUri);
+  return `${IG_AUTHORIZE}?${params.toString()}`;
+
 }
 
 /**
