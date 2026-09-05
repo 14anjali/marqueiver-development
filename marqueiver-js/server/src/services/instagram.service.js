@@ -376,6 +376,8 @@ export function buildAuthUrl(state) {
   });
 
   return `${IG_AUTHORIZE}?${params.toString()}`;
+  console.log('[Instagram OAuth] App ID being sent:', env.instagram.appId);
+console.log('[Instagram OAuth] Redirect URI:', env.instagram.redirectUri);
 }
 
 /**
