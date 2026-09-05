@@ -19,10 +19,30 @@ export default function ProfilePage() {
   const [ig, setIg] = useState(null);
   const [igConfirm, setIgConfirm] = useState(false);
   const [igBusy, setIgBusy] = useState(false);
+  const [igConnecting, setIgConnecting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [downloadingKit, setDownloadingKit] = useState(false);
   const [savingPrefs, setSavingPrefs] = useState(false);
   const toast = useToast();
+
+  /**
+   * Start Instagram OAuth, the same way the Facebook and YouTube cards do.
+   *
+   * The backend returns the authorize URL rather than redirecting, so the
+   * browser is sent there explicitly. No token is put in the URL by this
+   * component — `api.instagramAuthUrl()` sends it, and the backend embeds it in
+   * the signed `state` it hands to Instagram.
+   */
+  async function connectIg() {
+    setIgConnecting(true);
+    try {
+      const { data } = await api.instagramAuthUrl();
+      window.location.href = data.authUrl;
+    } catch (e) {
+      toast.push(e.detail?.message || e.message || 'Could not start Instagram connect', 'error');
+      setIgConnecting(false);
+    }
+  }
 
   /** Scope §16 / A73 — disconnect Instagram and clear it from the UI at once. */
   async function disconnectIg() {
@@ -46,7 +66,26 @@ export default function ProfilePage() {
 
   async function syncIg() {
     setSyncing(true);
-    try { const { data } = await api.instagramSync(); setIg(data); toast.push('Instagram synced ✓', 'success'); }
+    try {
+      /**
+       * The sync endpoint now returns `{ account, sync }` rather than the
+       * account alone — the report says which steps refreshed and which could
+       * not, so a partial sync can be reported instead of stale numbers being
+       * shown as current. `setIg(data)` on the new shape would have set the
+       * whole envelope as the account and blanked every field on the card.
+       */
+      const { data } = await api.instagramSync();
+      setIg(data.account ?? data);
+
+      const failed = Object.entries(data.sync?.steps ?? {})
+        .filter(([, s]) => s.status === 'failed');
+
+      if (failed.length) {
+        toast.push(`Instagram synced, but ${failed.length} part(s) could not refresh`, 'info');
+      } else {
+        toast.push('Instagram synced ✓', 'success');
+      }
+    }
     catch (e) { toast.push(e.message, 'error'); } finally { setSyncing(false); }
   }
 
@@ -234,7 +273,18 @@ export default function ProfilePage() {
             ) : (
               <div className="flex items-center justify-between">
                 <p className="text-sm text-muted">No Instagram account connected.</p>
-                <a href={`/onboarding/influencer`} className="btn-brand text-sm">Connect Instagram</a>
+                {/*
+                  This was `<a href="/onboarding/influencer">`, which did not
+                  connect anything — it navigated into onboarding, so a person
+                  who had already finished onboarding was bounced through a flow
+                  they had completed and came back still unconnected. Facebook
+                  and YouTube both start OAuth from here; Instagram now does the
+                  same thing the other two do.
+                */}
+                <button type="button" className="btn-brand text-sm" disabled={igConnecting}
+                  onClick={connectIg}>
+                  {igConnecting ? 'Opening Instagram…' : 'Connect Instagram'}
+                </button>
               </div>
             )}
           </div>
@@ -246,7 +296,12 @@ export default function ProfilePage() {
           disconnect={api.disconnectFacebook}
           renderConnected={(fb) => (
             <>
-              <div className="font-semibold text-ink flex items-center gap-1">{fb.pageName} <Check className="w-4 h-4 text-emerald-500" /></div>
+              {/* The model field is `name`. `pageName` was never a path on the
+                  schema, so this rendered blank on every connected Page. */}
+              <div className="font-semibold text-ink flex items-center gap-1">{fb.name} <Check className="w-4 h-4 text-emerald-500" /></div>
+              {typeof fb.followersCount === 'number' && (
+                <div className="text-sm text-muted">{fb.followersCount.toLocaleString('en-IN')} followers</div>
+              )}
               {fb.lastSyncedAt && <div className="text-[11px] text-muted mt-0.5">Last synced {new Date(fb.lastSyncedAt).toLocaleString()}</div>}
             </>
           )}

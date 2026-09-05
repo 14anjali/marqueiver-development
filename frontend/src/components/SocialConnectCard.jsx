@@ -49,8 +49,25 @@ export default function SocialConnectCard({
     setSyncing(true);
     try {
       const { data } = await sync();
-      setData(data);
-      toast.push(`${label} synced`, 'success');
+
+      /**
+       * Sync now answers `{ page | account, sync }` — the report says which
+       * steps refreshed and which could not, so a partial run can be reported
+       * rather than stale numbers being presented as current. Unwrapped here,
+       * with a fallback to the bare object so a platform still on the old
+       * shape (YouTube) keeps working.
+       */
+      setData(data.page ?? data.account ?? data);
+
+      const failed = Object.entries(data.sync?.steps ?? {})
+        .filter(([, s]) => s.status === 'failed');
+
+      toast.push(
+        failed.length
+          ? `${label} synced, but ${failed.length} part(s) could not refresh`
+          : `${label} synced`,
+        failed.length ? 'info' : 'success',
+      );
     } catch (e) { toast.push(e.message, 'error'); } finally { setSyncing(false); }
   }
 
