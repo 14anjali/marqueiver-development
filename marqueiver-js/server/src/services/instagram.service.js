@@ -56,7 +56,8 @@ const IG_GRAPH_HOST = 'https://graph.instagram.com';
 // Business Login scopes.
 const DEFAULT_SCOPES = [
   'instagram_business_basic',
-  'instagram_business_manage_insights'
+  'instagram_business_content_publish',
+  'instagram_business_manage_insights',
 ];
 
 /** Short-lived Instagram tokens last an hour; long-lived ones sixty days. */
@@ -415,6 +416,37 @@ export async function exchangeCodeForToken(code) {
   }
 
   /**
+   * What Instagram ACTUALLY granted, before any defaulting.
+   *
+   * `scopeCount: 3` in the connect logs is not the evidence it appears to be:
+   * the returned `scopes` fall back to DEFAULT_SCOPES when Instagram sends no
+   * permissions, and DEFAULT_SCOPES has three entries. So a grant of nothing
+   * and a grant of all three print the same number, and "were the scopes
+   * granted?" has been unanswerable from the logs.
+   *
+   * `grantedPermissions` here is the raw value: an empty array means Instagram
+   * granted none, which is a completely different problem from a bad endpoint.
+   *
+   * The token prefix is 8 characters. Meta token families are identifiable by
+   * their prefix — `IGQ…` is an Instagram User token, `EAA…` a Facebook
+   * one — and that single fact says whether this token belongs on
+   * graph.instagram.com at all. Eight characters cannot be used to
+   * authenticate anything.
+   */
+  logger.info('Instagram OAuth step:', {
+    operation: 'inspectTokenGrant',
+    status: 'ok',
+    appIdUsed: env.instagram.appId,          // public identifier, not a secret
+    tokenPrefix: String(parsed.accessToken).slice(0, 8),
+    tokenLength: String(parsed.accessToken).length,
+    grantedPermissions: parsed.permissions,  // raw — NOT the DEFAULT_SCOPES fallback
+    grantedCount: parsed.permissions.length,
+    requestedScopes: DEFAULT_SCOPES,
+    userId: parsed.userId,                   // an account id, not a credential
+    userIdPrefix: String(parsed.userId).slice(0, 6),
+  });
+
+  /**
    * Upgrade to a long-lived token.
    *
    * Documented unversioned, and routed through `igGet` so a stray version
@@ -570,6 +602,118 @@ export async function fetchProfile(accessToken, igUserId) {
     website: p.website,
     dataSource: 'connected',
   };
+}
+
+/* ────────────────────────────── diagnostics ──────────────────────────────── */
+
+/**
+ * Ask Meta what this token actually is, when a profile read has failed.
+ *
+ * ── Why a probe rather than another endpoint change ────────────────────────
+ * The failure being diagnosed is that EVERY `graph.instagram.com` request is
+ * refused with `(#100) Unsupported request - method type: get` — `/me`, the
+ * id-addressed node, and the long-lived token exchange alike. That last one
+ * matters most: it means the failure is not about which node is asked for,
+ * because `/access_token` is not a node. Something about the host and token
+ * pairing is wrong, and guessing a fourth endpoint would be the fourth guess.
+ *
+ * Meta can answer this directly. `debug_token` reports which app issued the
+ * token, its type and its scopes; trying the equivalent read on
+ * `graph.facebook.com` establishes which API generation the token belongs to —
+ * Instagram Login tokens work only on graph.instagram.com, Facebook Login
+ * tokens only on graph.facebook.com. One run distinguishes them.
+ *
+ * This is a diagnostic, not a fallback. It runs only when a profile read has
+ * already failed, only when INSTAGRAM_DIAGNOSTICS=1, it changes no behaviour,
+ * and it never returns data to the caller — it writes findings to the log and
+ * that is all. Nothing here becomes a code path that quietly papers over a
+ * misconfiguration.
+ *
+ * No token, secret or authorization code is ever logged: only HTTP status,
+ * Meta's own message, and its error codes.
+ */
+export async function diagnoseInstagramToken(accessToken, igUserId) {
+  const findings = [];
+
+  const probe = async (label, url, params) => {
+    const target = new URL(url);
+    for (const [k, v] of Object.entries(params)) target.searchParams.set(k, String(v));
+
+    try {
+      const res = await fetch(target);
+      const text = await res.text().catch(() => '');
+      let body; try { body = JSON.parse(text); } catch { body = null; }
+
+      findings.push({
+        probe: label,
+        // Host and path only — the query string carries the token.
+        endpoint: `${target.origin}${target.pathname}`,
+        status: res.status,
+        ok: res.ok,
+        providerCode: body?.error?.code ?? null,
+        providerSubcode: body?.error?.error_subcode ?? null,
+        providerMessage: body?.error?.message ?? null,
+        // Field NAMES only. The values are the person's profile.
+        returnedFields: res.ok && body ? Object.keys(body).slice(0, 12) : undefined,
+      });
+    } catch (err) {
+      findings.push({ probe: label, endpoint: `${target.origin}${target.pathname}`, transportError: String(err?.cause?.code ?? err?.message ?? 'failed') });
+    }
+  };
+
+  // 1. What does Meta say this token IS? App id, type, scopes, expiry.
+  //    Needs an app access token, which is `{app-id}|{app-secret}` — built here
+  //    and never logged.
+  if (env.instagram.appId && env.instagram.appSecret) {
+    await probe('debug_token', 'https://graph.facebook.com/debug_token', {
+      input_token: accessToken,
+      access_token: `${env.instagram.appId}|${env.instagram.appSecret}`,
+    });
+  }
+
+  // 2. The read that is failing, so its exact response sits beside the others.
+  await probe('instagram-host /me', `${IG_GRAPH_HOST}/me`, {
+    fields: 'user_id,username', access_token: accessToken,
+  });
+
+  /**
+   * 2b. The version dimension — the gap in the elimination so far.
+   *
+   * `/v22.0/me` failed, so the version prefix was removed; `/me` then failed
+   * too, and the conclusion drawn was "versioning is not the problem". That
+   * does not follow. v22.0 is old enough to have been retired, and a retired
+   * version and an unsupported path produce the same code-100 response — so
+   * "an old version fails" and "unversioned fails" together say nothing about
+   * whether a CURRENT version works. It was never tried.
+   *
+   * Three forms, one run, and the answer is no longer a matter of opinion.
+   */
+  for (const version of ['v23.0', 'v22.0']) {
+    await probe(`instagram-host /${version}/me`, `${IG_GRAPH_HOST}/${version}/me`, {
+      fields: 'user_id,username', access_token: accessToken,
+    });
+  }
+
+  // 3. The same read on the Facebook host. Success here would mean the token
+  //    belongs to the Facebook Login generation and the app is configured for
+  //    "Instagram API with Facebook Login", not Instagram Login.
+  await probe('facebook-host /me', 'https://graph.facebook.com/me', {
+    fields: 'id,name', access_token: accessToken,
+  });
+
+  // 4. Does the token grant anything at all on the Facebook host?
+  await probe('facebook-host /me/accounts', 'https://graph.facebook.com/me/accounts', {
+    access_token: accessToken,
+  });
+
+  if (igUserId) {
+    await probe('instagram-host /{id}', `${IG_GRAPH_HOST}/${igUserId}`, {
+      fields: 'username', access_token: accessToken,
+    });
+  }
+
+  logger.warn('Instagram diagnostics — what Meta says about this token:', { findings });
+  return findings;
 }
 
 /* ─────────────────────────── media & insights ────────────────────────────── */
