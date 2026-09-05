@@ -358,6 +358,8 @@ async function igGetFieldsFromNodes(nodes, fields, accessToken, label) {
  */
 export function buildAuthUrl(state) {
   const redirectUri = env.instagram.redirectUri;
+    console.log('[Instagram OAuth] App ID being sent:', env.instagram.appId);
+console.log('[Instagram OAuth] Redirect URI:', env.instagram.redirectUri);
 
   // Mock mode
   if (!isLiveMode()) {
@@ -374,8 +376,7 @@ export function buildAuthUrl(state) {
     response_type: 'code',
     state,
   });
-  console.log('[Instagram OAuth] App ID being sent:', env.instagram.appId);
-console.log('[Instagram OAuth] Redirect URI:', env.instagram.redirectUri);
+
   return `${IG_AUTHORIZE}?${params.toString()}`;
 
 }
