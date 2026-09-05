@@ -524,9 +524,57 @@ export async function exchangeCodeForToken(code) {
     user_id: parsed.userId,
     tokenType: 'bearer',
     scopes: parsed.permissions.length ? parsed.permissions : DEFAULT_SCOPES,
+    /**
+     * What Instagram ACTUALLY granted, with no fallback applied.
+     *
+     * `scopes` above defaults to DEFAULT_SCOPES when Instagram returns none, so
+     * it can never be empty and therefore can never answer "was anything
+     * granted?". That fallback is why `scopeCount: 3` was read as evidence of a
+     * successful grant for several days when it was only evidence of a default.
+     *
+     * An empty array here, alongside a successful OAuth, is the signature of a
+     * permission that has not cleared App Review: Meta renders the consent
+     * screen, issues a syntactically valid token, and authorises nothing.
+     */
+    grantedPermissions: parsed.permissions,
     expires_in: expiresIn,
     longLived,
   };
+}
+
+/**
+ * Is this the failure of a token that was granted nothing?
+ *
+ * Production reached a state where all six probes returned 400 — `/me`,
+ * `/v23.0/me`, `/v22.0/me`, the id node, and both Facebook-host reads. A token
+ * that authorises nothing on *either* host, after an OAuth that succeeded, is
+ * not a malformed request: node, version and API generation were each varied
+ * independently and none of them moved the result.
+ *
+ * When that pattern coincides with an empty grant, the honest error names the
+ * cause instead of repeating Meta's `Unsupported request - method type: get`,
+ * which describes the symptom and points nowhere.
+ */
+export function looksLikeMissingGrant(err, grantedPermissions) {
+  const noneGranted = Array.isArray(grantedPermissions) && grantedPermissions.length === 0;
+  const providerCode = Number(err?.details?.providerCode);
+  return noneGranted && providerCode === 100;
+}
+
+/** The error to raise when the grant is empty and the graph refuses everything. */
+export function missingGrantError() {
+  return new ApiError(403, 'INSTAGRAM_PERMISSIONS_NOT_GRANTED',
+    'Instagram signed you in but did not grant Marqueiver permission to read your '
+    + 'profile. This is an app-level approval, not something wrong with your account.',
+    {
+      platform: 'instagram',
+      action: 'contact-support',
+      howTo: [
+        'The app needs Advanced Access for instagram_business_basic, approved through Meta App Review.',
+        'Until that is approved, only accounts with a role on the app (Admin, Developer or Tester) can connect.',
+        'Check App Review → Permissions and Features: if instagram_business_basic shows Standard Access, that is the blocker.',
+      ],
+    });
 }
 
 /* ─────────────────────────────── graph reads ─────────────────────────────── */

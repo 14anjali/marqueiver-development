@@ -250,6 +250,23 @@ export const instagramCallback = catchAsync(async (req, res) => {
     const igUserId = token.user_id;
 
     /**
+     * Did Instagram grant anything at all?
+     *
+     * Logged before the profile read, so the answer is in the record whether or
+     * not that read succeeds. An empty grant alongside a successful OAuth means
+     * the permission has not cleared App Review — Meta renders consent, issues
+     * a syntactically valid token, and authorises nothing.
+     */
+    if (Array.isArray(token.grantedPermissions) && token.grantedPermissions.length === 0) {
+      logger.warn('Instagram OAuth step:', {
+        operation: 'inspectGrant',
+        status: 'no-permissions-granted',
+        note: 'Instagram returned an empty permissions list. Advanced Access for '
+          + 'instagram_business_basic is the usual cause; graph reads will fail.',
+      });
+    }
+
+    /**
      * Step 6 — the profile, which is what eligibility is judged on, and which
      * also carries the authoritative account id.
      *
@@ -334,8 +351,22 @@ export const instagramCallback = catchAsync(async (req, res) => {
       }
     }
 
+    /**
+     * Replace Meta's symptom with the actual cause, when we can prove it.
+     *
+     * `Unsupported request - method type: get` is what Instagram says when the
+     * app may not call the endpoint. It describes the response and names
+     * nothing, and it has been shown to creators — and pasted into this
+     * debugging thread — a dozen times while meaning "your app is not
+     * approved". When the token was granted no permissions and the graph
+     * refused with code 100, that is knowable, so it gets said.
+     */
+    const surfaced = instagramService.looksLikeMissingGrant(err, diagnosticToken?.grantedPermissions)
+      ? instagramService.missingGrantError()
+      : err;
+
     return redirectResult(res, false,
-      userFacingMessage(err, 'Instagram connection failed. Please try again.'),
+      userFacingMessage(surfaced, 'Instagram connection failed. Please try again.'),
       diagnosis);
   }
 });
