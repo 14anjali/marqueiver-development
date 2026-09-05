@@ -62,6 +62,29 @@ function stubFetch(handler) {
 
 test.afterEach(() => { globalThis.fetch = realFetch; });
 
+/**
+ * A graph path with any leading `/vNN.N` version segment removed.
+ *
+ * `INSTAGRAM_GRAPH_VERSION` now defaults to a current version, so requests go
+ * to `/v23.0/me` first and fall back to `/me`. Tests that care about the NODE
+ * ("did it ask for me, or for the id?") should not also be asserting the
+ * version — that is a separate question, covered by its own tests below.
+ */
+const node = (pathname) => pathname.replace(/^\/v\d+\.\d+/, '');
+
+/**
+ * The sequence of NODES a run tried, version-stripped and de-duplicated.
+ *
+ * Each node is now attempted twice — once versioned, once unversioned — so a
+ * raw list reads `['/me', '/me', '/178414']` and buries the thing under test.
+ * Collapsing consecutive repeats leaves the question these tests actually ask:
+ * which nodes were tried, and in what order.
+ */
+const nodesOf = (paths) => paths
+    .map(node)
+    .filter((p, i, all) => i === 0 || p !== all[i - 1]);
+
+
 /** The exact body Instagram returned in production. */
 const PATH_REJECTION = {
     error: {
@@ -158,7 +181,7 @@ test('the long-lived exchange uses the unversioned graph path and ig_exchange_to
 
     const upgrade = calls[1];
     assert.equal(upgrade.url.host, 'graph.instagram.com');
-    assert.equal(upgrade.url.pathname, '/access_token', 'no version prefix');
+    assert.equal(node(upgrade.url.pathname), '/access_token', 'the access_token endpoint, whatever the version prefix');
     assert.equal(upgrade.url.searchParams.get('grant_type'), 'ig_exchange_token');
     assert.equal(upgrade.url.searchParams.get('client_secret'), 'test_ig_app_secret');
 
@@ -200,7 +223,7 @@ test('fetchMe hits graph.instagram.com/me with user_id and username', async () =
     const me = await ig.fetchMe('TOKEN');
 
     assert.equal(calls[0].url.host, 'graph.instagram.com');
-    assert.equal(calls[0].url.pathname, '/me');
+    assert.equal(node(calls[0].url.pathname), '/me');
     assert.equal(calls[0].url.searchParams.get('fields'), 'user_id,username');
     assert.equal(me.id, '17841400000000000');
     assert.equal(me.username, 'creator');
@@ -322,7 +345,7 @@ test('a MEDIA_CREATOR account completes the callback', async () => {
     const { saved } = await runCallback({
         handler: (url) => {
             if (url.host === 'api.instagram.com') return { json: { data: [{ access_token: 'SHORT', user_id: 178414 }] } };
-            if (url.pathname === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
+            if (node(url.pathname) === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
             return { json: profileJson({ user_id: '178414', account_type: 'MEDIA_CREATOR' }) };
         },
     });
@@ -388,7 +411,8 @@ async function runCallback({ handler, expectMeCall }) {
         // Every graph read that was not the token exchange or the long-lived
         // upgrade — i.e. the profile reads, in the order they were attempted.
         const graphReads = calls
-            .filter((c) => c.url.host === 'graph.instagram.com' && c.url.pathname !== '/access_token')
+            .filter((c) => c.url.host === 'graph.instagram.com'
+                && node(c.url.pathname) !== '/access_token')
             .map((c) => c.url.pathname);
 
         const meCalled = graphReads.some((p) => p.endsWith('/me'));
@@ -433,12 +457,12 @@ test('the profile is read from the `me` node, in a single request', async () => 
     const { redirect, saved, graphReads } = await runCallback({
         handler: (url) => {
             if (url.host === 'api.instagram.com') return { json: { data: [{ access_token: 'SHORT', user_id: 17841400000000000 }] } };
-            if (url.pathname === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
+            if (node(url.pathname) === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
             return { json: profileJson() };
         },
     });
 
-    assert.deepEqual(graphReads, ['/me'], 'exactly one profile read, against the me node');
+    assert.deepEqual(nodesOf(graphReads), ['/me'], 'exactly one profile read, against the me node');
     assert.equal(redirect.searchParams.get('ig'), 'connected');
     assert.equal(saved.doc.igUserId, '17841400000000000');
     assert.equal(saved.doc.accountType, 'CREATOR');
@@ -452,15 +476,15 @@ test('the exact production rejection on `me` falls back to the id node', async (
     const { redirect, saved, graphReads } = await runCallback({
         handler: (url) => {
             if (url.host === 'api.instagram.com') return { json: { data: [{ access_token: 'SHORT', user_id: 178414 }] } };
-            if (url.pathname === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
-            if (url.pathname === '/me') {
+            if (node(url.pathname) === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
+            if (node(url.pathname) === '/me') {
                 return { status: 400, json: { error: { message: 'Unsupported request - method type: get', type: 'IGApiException', code: 100 } } };
             }
             return { json: profileJson({ user_id: '178414' }) };
         },
     });
 
-    assert.deepEqual(graphReads, ['/me', '/178414'], 'it must try me, then the id');
+    assert.deepEqual(nodesOf(graphReads), ['/me', '/178414'], 'it must try me, then the id');
     assert.equal(redirect.searchParams.get('ig'), 'connected');
     assert.equal(saved.doc.igUserId, '178414');
 });
@@ -469,12 +493,12 @@ test('a token response with no user_id still connects, using `me` alone', async 
     const { redirect, saved, graphReads } = await runCallback({
         handler: (url) => {
             if (url.host === 'api.instagram.com') return { json: { data: [{ access_token: 'SHORT' }] } };
-            if (url.pathname === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
+            if (node(url.pathname) === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
             return { json: profileJson({ user_id: '178414' }) };
         },
     });
 
-    assert.deepEqual(graphReads, ['/me'], 'with no id there is only one node to try');
+    assert.deepEqual(nodesOf(graphReads), ['/me'], 'with no id there is only one node to try');
     assert.equal(redirect.searchParams.get('ig'), 'connected');
     assert.equal(saved.doc.igUserId, '178414', 'the id comes back inside the profile');
 });
@@ -486,12 +510,12 @@ test('the id node is never used as the only candidate', async () => {
     const { graphReads } = await runCallback({
         handler: (url) => {
             if (url.host === 'api.instagram.com') return { json: { data: [{ access_token: 'SHORT', user_id: 178414 }] } };
-            if (url.pathname === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
+            if (node(url.pathname) === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
             return { json: profileJson({ user_id: '178414' }) };
         },
     });
 
-    assert.equal(graphReads[0], '/me', 'the first profile read must be the me node');
+    assert.equal(node(graphReads[0]), '/me', 'the first profile read must be the me node');
 });
 
 test('the callback survives the production failure end to end instead of 500ing', async () => {
@@ -505,7 +529,7 @@ test('the callback survives the production failure end to end instead of 500ing'
             handler: (url) => {
                 if (url.host === 'api.instagram.com') return { json: { data: [{ access_token: 'SHORT', user_id: 178414 }] } };
                 if (url.pathname.startsWith('/v22.0/')) return { status: 400, json: PATH_REJECTION };
-                if (url.pathname === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
+                if (node(url.pathname) === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
                 return { json: profileJson({ user_id: '178414' }) };
             },
         });
@@ -522,7 +546,7 @@ test('an ineligible account is redirected with a readable reason, not a JSON err
     const { redirect } = await runCallback({
         handler: (url) => {
             if (url.host === 'api.instagram.com') return { json: { data: [{ access_token: 'SHORT', user_id: 178414 }] } };
-            if (url.pathname === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
+            if (node(url.pathname) === '/access_token') return { json: { access_token: 'LONG', expires_in: 5184000 } };
             return { json: profileJson({ account_type: 'PERSONAL' }) };
         },
     });
@@ -546,7 +570,7 @@ test('the stored token expiry matches the token actually held', async () => {
     const { saved } = await runCallback({
         handler: (url) => {
             if (url.host === 'api.instagram.com') return { json: { data: [{ access_token: 'SHORT', user_id: 178414 }] } };
-            if (url.pathname === '/access_token') return { status: 400, json: PATH_REJECTION };
+            if (node(url.pathname) === '/access_token') return { status: 400, json: PATH_REJECTION };
             return { json: profileJson({ user_id: '178414' }) };
         },
     });

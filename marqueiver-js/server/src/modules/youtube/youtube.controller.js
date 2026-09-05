@@ -75,9 +75,19 @@ async function persistProfile(userId, token, profile) {
 /** Begin the OAuth consent flow. */
 export const startYoutubeAuth = catchAsync(async (req, res) => {
   const nonce = youtubeService.newState();
+  /**
+   * Header only. The `?token=` fallback that used to sit here is removed.
+   *
+   * It put a live JWT in the URL, and a URL is logged by every layer it passes
+   * through — this project's own Render logs carried working access tokens in
+   * plaintext because of it, and a token in a log is a token anyone with log
+   * access can replay until it expires. The frontend already sends
+   * `Authorization: Bearer` on this call, so the query parameter bought
+   * nothing and cost that.
+   */
   const token = req.headers.authorization?.startsWith('Bearer ')
     ? req.headers.authorization.slice(7)
-    : req.query.token;
+    : null;
 
   if (!token) throw ApiError.unauthorized('Missing access token for YouTube connect');
 

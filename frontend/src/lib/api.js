@@ -101,17 +101,46 @@ export const api = {
     req('/api/auth/policies/accept', { method: 'POST', body: { acceptedPolicies, context } }),
 
   // ---- Instagram (SRS FR-4/FR-5) ----
-  instagramAuthUrl: () => req(`/api/auth/instagram?token=${encodeURIComponent(auth.token)}`),
+  instagramAuthUrl: () => req('/api/auth/instagram'),
   instagramProfile: () => req('/api/instagram/profile'),
   instagramSync: () => req('/api/instagram/sync', { method: 'POST' }),
 
-  // ---- Facebook (optional connect, Profile page only) ----
-  facebookAuthUrl: () => req(`/api/auth/facebook?token=${encodeURIComponent(auth.token)}`),
+  // ---- Facebook Pages ----
+  facebookAuthUrl: () => req('/api/auth/facebook'),
   facebookProfile: () => req('/api/facebook/profile'),
   facebookSync: () => req('/api/facebook/sync', { method: 'POST' }),
 
+  /**
+   * The Pages this person can act on, read live from Facebook.
+   *
+   * Page access tokens are stripped server-side and never reach the browser —
+   * a Page token in frontend state can be read straight out of devtools, and it
+   * grants publishing rights on that Page. Each entry carries `canPublish` and
+   * `canModerate`, derived from Facebook's own `tasks`, so the UI can disable
+   * an action the person's Page role does not allow instead of letting them
+   * write a post and fail at submit.
+   */
+  facebookPages: () => req('/api/facebook/pages'),
+  selectFacebookPage: (pageId) =>
+    req('/api/facebook/pages/select', { method: 'POST', body: { pageId } }),
+
+  facebookPosts: (limit = 25) => req(`/api/facebook/posts?limit=${limit}`),
+  publishFacebookPost: ({ message, link }) =>
+    req('/api/facebook/posts', { method: 'POST', body: { message, link } }),
+  deleteFacebookPost: (postId) =>
+    req(`/api/facebook/posts/${encodeURIComponent(postId)}`, { method: 'DELETE' }),
+
+  facebookComments: (postId, limit = 50) =>
+    req(`/api/facebook/posts/${encodeURIComponent(postId)}/comments?limit=${limit}`),
+  replyToFacebookComment: (commentId, message) =>
+    req(`/api/facebook/comments/${encodeURIComponent(commentId)}/reply`, { method: 'POST', body: { message } }),
+  hideFacebookComment: (commentId, hidden = true) =>
+    req(`/api/facebook/comments/${encodeURIComponent(commentId)}/hide`, { method: 'POST', body: { hidden } }),
+  deleteFacebookComment: (commentId) =>
+    req(`/api/facebook/comments/${encodeURIComponent(commentId)}`, { method: 'DELETE' }),
+
   // ---- YouTube (optional connect, Profile page only) ----
-  youtubeAuthUrl: () => req(`/api/auth/youtube?token=${encodeURIComponent(auth.token)}`),
+  youtubeAuthUrl: () => req('/api/auth/youtube'),
   youtubeProfile: () => req('/api/youtube/profile'),
   youtubeSync: () => req('/api/youtube/sync', { method: 'POST' }),
   instagramDisconnect: () =>

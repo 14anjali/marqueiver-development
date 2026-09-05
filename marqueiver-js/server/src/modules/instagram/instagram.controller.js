@@ -156,9 +156,19 @@ async function persistProfile(userId, token, profile) {
 export const startInstagramAuth = catchAsync(async (req, res) => {
   // `state` carries a CSRF nonce + the caller's JWT so the callback can identify them.
   const nonce = instagramService.newState();
+  /**
+   * Header only. The `?token=` fallback that used to sit here is removed.
+   *
+   * It put a live JWT in the URL, and a URL is logged by every layer it passes
+   * through — this project's own Render logs carried working access tokens in
+   * plaintext because of it, and a token in a log is a token anyone with log
+   * access can replay until it expires. The frontend already sends
+   * `Authorization: Bearer` on this call, so the query parameter bought
+   * nothing and cost that.
+   */
   const token = req.headers.authorization?.startsWith('Bearer ')
     ? req.headers.authorization.slice(7)
-    : req.query.token;
+    : null;
 
   if (!token) throw ApiError.unauthorized('Missing access token for Instagram connect');
 
@@ -196,10 +206,17 @@ export const instagramCallback = catchAsync(async (req, res) => {
    * failure is now carried into the UI on the same redirect the success path
    * uses, so onboarding stays in control of what happens next.
    */
+  /**
+   * Held so the diagnostics in the catch can probe the same token that failed.
+   * Never logged, never returned — see diagnoseInstagramToken.
+   */
+  let diagnosticToken = null;
+
   try {
     // Step 2 — exchange the code. This already returns the Instagram user id.
     const token = await step('exchangeCodeForToken', () =>
       instagramService.exchangeCodeForToken(String(code)));
+    diagnosticToken = token;
 
     /**
      * Step 3 — what did the token response actually contain?
@@ -282,8 +299,44 @@ export const instagramCallback = catchAsync(async (req, res) => {
       ...describeError(err),
     });
 
+    /**
+     * When a profile read fails, ask Meta what the token actually is.
+     *
+     * Deliberately not a fallback: it changes no behaviour and the connection
+     * still fails. It exists because several endpoint guesses have not explained
+     * why every graph.instagram.com request is refused, and the way out of that
+     * is evidence rather than another guess.
+     */
+    let diagnosis = null;
+    if (env.instagram.diagnostics && err?.marqueiverStep === 'fetchProfile' && diagnosticToken) {
+      try {
+        const findings = await instagramService.diagnoseInstagramToken(
+          diagnosticToken.access_token, diagnosticToken.user_id,
+        );
+
+        /**
+         * A compact summary carried back on the redirect.
+         *
+         * The findings go to the server log, which is where they belong — but
+         * the log is not what reaches the person debugging this. What reaches
+         * them is the URL, so the URL now carries the one-line verdict too:
+         * each probe as `name:status`, e.g. `me:400,v23:200,fb:400`. That is
+         * enough to name the cause without opening a log viewer.
+         *
+         * Only probe labels and HTTP status codes — no token, no id, nothing
+         * about the person. Present only while diagnostics are enabled.
+         */
+        diagnosis = findings
+          .map((f) => `${f.probe.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '')}:${f.status ?? 'err'}`)
+          .join(',');
+      } catch (probeErr) {
+        logger.warn('Instagram diagnostics could not run', describeError(probeErr));
+      }
+    }
+
     return redirectResult(res, false,
-      userFacingMessage(err, 'Instagram connection failed. Please try again.'));
+      userFacingMessage(err, 'Instagram connection failed. Please try again.'),
+      diagnosis);
   }
 });
 
@@ -401,14 +454,24 @@ export const disconnectInstagram = catchAsync(async (req, res) => {
  */
 
 // Redirect back to the frontend with a result flag the SPA can react to.
-function redirectResult(res, success, message) {
-//   const url = new URL('/onboarding/instagram', env.clientUrl);
+function redirectResult(res, success, message, diagnosis) {
+  //   const url = new URL('/onboarding/instagram', env.clientUrl);
 
-//for development
-const redirectPath = success ? '/profile' : '/onboarding/instagram';
-const url = new URL(redirectPath, env.clientUrl);
-//
+  //for development
+  const redirectPath = success ? '/profile' : '/onboarding/instagram';
+  const url = new URL(redirectPath, env.clientUrl);
+  //
   url.searchParams.set('ig', success ? 'connected' : 'error');
   url.searchParams.set('message', message);
+
+  /**
+   * The probe summary, when diagnostics produced one.
+   *
+   * Probe labels and HTTP status codes only — nothing identifying, no
+   * credential. It rides along on the failure redirect so the verdict is
+   * visible in the address bar rather than only in the server log.
+   */
+  if (diagnosis) url.searchParams.set('diag', diagnosis);
+
   res.redirect(url.toString());
 }

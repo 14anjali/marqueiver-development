@@ -191,18 +191,26 @@ resendApiKey: process.env.RESEND_API_KEY ?? '',
         /**
          * Version prefix for graph.instagram.com, e.g. 'v23.0'.
          *
-         * Empty by default, and that is a decision rather than an omission: the
-         * Instagram-Login endpoints are documented unversioned
-         * (`https://graph.instagram.com/me`), and a version segment the host
-         * does not recognise is read as a *node id* — which is exactly what
-         * produced `IGApiException code 100 "Unsupported request - method
-         * type: get"` in production against `/v22.0/me`.
+         * Defaults to a CURRENT version, and that default is the change.
          *
-         * Set this only to pin a version you have confirmed works. The client
-         * falls back to the unversioned path either way and logs when it had
-         * to, so a wrong value degrades to a warning instead of an outage.
+         * The history matters, because two failures were read as one. `/v22.0/me`
+         * failed, so the version was removed; the unversioned `/me` then failed
+         * too, and that was taken to mean "versioning is not the problem". It
+         * does not mean that. v22.0 is old enough to have been retired, and a
+         * retired version and an unroutable path return the *same* code-100
+         * `Unsupported request - method type: get`. So "an old version fails"
+         * plus "unversioned fails" says nothing at all about whether a current
+         * version works — and a current one was never tried.
+         *
+         * `graphCandidates()` tries this version first and keeps the unversioned
+         * path as a fallback, so the previously-tested behaviour is still
+         * reachable: if v23.0 is wrong the request degrades to exactly what it
+         * does today, with a logged warning naming the version that was
+         * rejected. There is no path where this default makes things worse.
+         *
+         * Set INSTAGRAM_GRAPH_VERSION='' to force unversioned only.
          */
-        graphVersion: (process.env.INSTAGRAM_GRAPH_VERSION ?? '').trim().replace(/^\/+|\/+$/g, ''),
+        graphVersion: (process.env.INSTAGRAM_GRAPH_VERSION ?? 'v23.0').trim().replace(/^\/+|\/+$/g, ''),
         redirectUri: process.env.INSTAGRAM_REDIRECT_URI
             ?? `${process.env.API_URL ?? 'http://localhost:4000'}/api/auth/instagram/callback`,
 
