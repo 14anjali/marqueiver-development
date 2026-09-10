@@ -146,7 +146,7 @@ export const facebookCallback = catchAsync(async (req, res) => {
         status: 'pending_selection',
         // Any previously chosen Page is cleared: re-authorising may have
         // changed which Pages are available, so the choice is made again.
-        $unset: undefined,
+      
       },
       { upsert: true, new: true, setDefaultsOnInsert: true },
     );
