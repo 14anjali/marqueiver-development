@@ -1,0 +1,2128 @@
+[
+ {
+  "slug": "terms-of-use",
+  "number": 1,
+  "title": "Terms & Conditions",
+  "version": "2.0",
+  "effectiveFrom": "2026-08-01T00:00:00.000Z",
+  "requiredFor": [
+   "creator",
+   "brand"
+  ],
+  "signupPrimary": true,
+  "route": "/terms",
+  "intro": [
+   {
+    "type": "p",
+    "text": "These Terms govern access to and use of the Marqueiver platform, operated by Dahmion Technologies, an enterprise registered in India under Udyam Registration Number UDYAM-DL-06-0218469, having its principal place of business at New Delhi, India (\"Marqueiver\", \"we\", \"us\"). By creating an account or using the platform, you agree to these Terms."
+   }
+  ],
+  "sections": [
+   {
+    "number": "1.1",
+    "heading": "Definitions",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Platform — the Marqueiver website, applications and services.",
+       "Creator — an individual content creator registered to be discovered and engaged by Brands.",
+       "Brand — a business, agency or individual registered to discover and engage Creators.",
+       "Collaboration / Deal — an engagement between a Brand and a Creator arranged through the Platform.",
+       "Credits — prepaid platform units purchased by Brands to access Creator information."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "1.2",
+    "heading": "Nature of our role",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Marqueiver is an intermediary and technology platform under the Information Technology Act 2000. We facilitate discovery, communication, contracting and payment between Brands and Creators. We are not a party to the underlying contract for services between a Brand and a Creator, and we do not create, endorse or control the content a Creator produces."
+     },
+     {
+      "type": "p",
+      "text": "We do not act as an employer, agent or talent manager of any Creator, and no employment, partnership, joint venture or agency relationship arises between Marqueiver and any user."
+     }
+    ]
+   },
+   {
+    "number": "1.3",
+    "heading": "Eligibility",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "You must be at least 18 years of age and competent to contract under the Indian Contract Act 1872.",
+       "If you register on behalf of an entity, you warrant you are authorised to bind that entity.",
+       "You must provide accurate, current and complete information, and keep it updated.",
+       "One person or entity may hold only one account of each type unless we agree otherwise in writing."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "1.4",
+    "heading": "Accounts and security",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "You are responsible for all activity under your account and for maintaining the confidentiality of your credentials. You must notify us immediately at hello@marqueiver.com of any unauthorised use. We may require verification of identity at any time (see Policy 13)."
+     }
+    ]
+   },
+   {
+    "number": "1.5",
+    "heading": "Platform integrity — communication and payment must remain on-platform",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "All communication and all payment relating to a Collaboration arranged through Marqueiver must take place through the Platform. Users must not solicit or accept off-platform contact or payment for the purpose of avoiding platform fees. This is a material term; breach may result in suspension, termination and recovery of fees due (see Policies 11 and 14)."
+     }
+    ]
+   },
+   {
+    "number": "1.6",
+    "heading": "Fees",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Brands purchase Credits to access Creator information and pay Collaboration amounts through the Platform. Marqueiver charges a platform commission of 12.5% on Collaboration values as set out in Policy 14. Amounts are quoted exclusive of taxes. Marqueiver is not presently registered under GST and no GST is charged at this time; tax will apply only from the date of registration, on at least 15 days' notice. See Policy 6."
+     }
+    ]
+   },
+   {
+    "number": "1.7",
+    "heading": "Availability, changes and beta features",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "We aim to keep the Platform available but do not guarantee uninterrupted access. We may modify, suspend or discontinue features. Features marked beta or early access are provided as-is and may change or be withdrawn."
+     }
+    ]
+   },
+   {
+    "number": "1.8",
+    "heading": "Third-party services",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "The Platform integrates third-party services including payment gateways, social media platforms and analytics providers. Your use of those services is governed by their own terms. We are not responsible for their acts, omissions or availability."
+     }
+    ]
+   },
+   {
+    "number": "1.9",
+    "heading": "Disclaimers",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "The Platform is provided on an as-is and as-available basis. We do not warrant that any Brand will engage any Creator, that any Creator will deliver any particular outcome, or that any campaign will achieve any commercial result. Metrics, rate suggestions, audience estimates and AI-generated analysis are indicative only and must not be relied upon as guarantees."
+     }
+    ]
+   },
+   {
+    "number": "1.10",
+    "heading": "Limitation of liability",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "To the maximum extent permitted by law, Marqueiver's aggregate liability to any user arising out of or relating to the Platform shall not exceed the total fees actually received by Marqueiver from that user in the three months preceding the event giving rise to the claim. We are not liable for indirect, incidental, special or consequential loss, or loss of profit, revenue, goodwill or data."
+     },
+     {
+      "type": "p",
+      "text": "Note for legal review: consider whether this cap is enforceable and appropriate given escrow amounts held."
+     }
+    ]
+   },
+   {
+    "number": "1.11",
+    "heading": "Indemnity",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "You agree to indemnify and hold harmless Marqueiver, its directors, officers and employees against claims, losses and reasonable legal costs arising from your breach of these Terms or any applicable law, your content, or your dealings with another user."
+     }
+    ]
+   },
+   {
+    "number": "1.12",
+    "heading": "Governing law and jurisdiction",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "These Terms are governed by the laws of India. Subject to Policy 10 (Dispute Resolution), the courts at New Delhi shall have exclusive jurisdiction."
+     }
+    ]
+   },
+   {
+    "number": "1.13",
+    "heading": "Grievance Officer",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "In accordance with the Information Technology (Intermediary Guidelines and Digital Media Ethics Code) Rules 2021, the Grievance Officer is Harsh Bardhan, contactable at harsh@marqueiver.com. Complaints are acknowledged within 24 hours and resolved within 15 days of receipt."
+     }
+    ]
+   },
+   {
+    "number": "1.14",
+    "heading": "Changes to these Terms",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "We may amend these Terms. Material changes will be notified by email or in-platform notice at least 7 days before they take effect. Continued use after that date constitutes acceptance."
+     }
+    ]
+   }
+  ],
+  "body": "These Terms govern access to and use of the Marqueiver platform, operated by Dahmion Technologies, an enterprise registered in India under Udyam Registration Number UDYAM-DL-06-0218469, having its principal place of business at New Delhi, India (\"Marqueiver\", \"we\", \"us\"). By creating an account or using the platform, you agree to these Terms.\n\n## 1.1 Definitions\n\n- Platform — the Marqueiver website, applications and services.\n- Creator — an individual content creator registered to be discovered and engaged by Brands.\n- Brand — a business, agency or individual registered to discover and engage Creators.\n- Collaboration / Deal — an engagement between a Brand and a Creator arranged through the Platform.\n- Credits — prepaid platform units purchased by Brands to access Creator information.\n\n## 1.2 Nature of our role\n\nMarqueiver is an intermediary and technology platform under the Information Technology Act 2000. We facilitate discovery, communication, contracting and payment between Brands and Creators. We are not a party to the underlying contract for services between a Brand and a Creator, and we do not create, endorse or control the content a Creator produces.\n\nWe do not act as an employer, agent or talent manager of any Creator, and no employment, partnership, joint venture or agency relationship arises between Marqueiver and any user.\n\n## 1.3 Eligibility\n\n- You must be at least 18 years of age and competent to contract under the Indian Contract Act 1872.\n- If you register on behalf of an entity, you warrant you are authorised to bind that entity.\n- You must provide accurate, current and complete information, and keep it updated.\n- One person or entity may hold only one account of each type unless we agree otherwise in writing.\n\n## 1.4 Accounts and security\n\nYou are responsible for all activity under your account and for maintaining the confidentiality of your credentials. You must notify us immediately at hello@marqueiver.com of any unauthorised use. We may require verification of identity at any time (see Policy 13).\n\n## 1.5 Platform integrity — communication and payment must remain on-platform\n\nAll communication and all payment relating to a Collaboration arranged through Marqueiver must take place through the Platform. Users must not solicit or accept off-platform contact or payment for the purpose of avoiding platform fees. This is a material term; breach may result in suspension, termination and recovery of fees due (see Policies 11 and 14).\n\n## 1.6 Fees\n\nBrands purchase Credits to access Creator information and pay Collaboration amounts through the Platform. Marqueiver charges a platform commission of 12.5% on Collaboration values as set out in Policy 14. Amounts are quoted exclusive of taxes. Marqueiver is not presently registered under GST and no GST is charged at this time; tax will apply only from the date of registration, on at least 15 days' notice. See Policy 6.\n\n## 1.7 Availability, changes and beta features\n\nWe aim to keep the Platform available but do not guarantee uninterrupted access. We may modify, suspend or discontinue features. Features marked beta or early access are provided as-is and may change or be withdrawn.\n\n## 1.8 Third-party services\n\nThe Platform integrates third-party services including payment gateways, social media platforms and analytics providers. Your use of those services is governed by their own terms. We are not responsible for their acts, omissions or availability.\n\n## 1.9 Disclaimers\n\nThe Platform is provided on an as-is and as-available basis. We do not warrant that any Brand will engage any Creator, that any Creator will deliver any particular outcome, or that any campaign will achieve any commercial result. Metrics, rate suggestions, audience estimates and AI-generated analysis are indicative only and must not be relied upon as guarantees.\n\n## 1.10 Limitation of liability\n\nTo the maximum extent permitted by law, Marqueiver's aggregate liability to any user arising out of or relating to the Platform shall not exceed the total fees actually received by Marqueiver from that user in the three months preceding the event giving rise to the claim. We are not liable for indirect, incidental, special or consequential loss, or loss of profit, revenue, goodwill or data.\n\nNote for legal review: consider whether this cap is enforceable and appropriate given escrow amounts held.\n\n## 1.11 Indemnity\n\nYou agree to indemnify and hold harmless Marqueiver, its directors, officers and employees against claims, losses and reasonable legal costs arising from your breach of these Terms or any applicable law, your content, or your dealings with another user.\n\n## 1.12 Governing law and jurisdiction\n\nThese Terms are governed by the laws of India. Subject to Policy 10 (Dispute Resolution), the courts at New Delhi shall have exclusive jurisdiction.\n\n## 1.13 Grievance Officer\n\nIn accordance with the Information Technology (Intermediary Guidelines and Digital Media Ethics Code) Rules 2021, the Grievance Officer is Harsh Bardhan, contactable at harsh@marqueiver.com. Complaints are acknowledged within 24 hours and resolved within 15 days of receipt.\n\n## 1.14 Changes to these Terms\n\nWe may amend these Terms. Material changes will be notified by email or in-platform notice at least 7 days before they take effect. Continued use after that date constitutes acceptance."
+ },
+ {
+  "slug": "privacy-policy",
+  "number": 2,
+  "title": "Privacy Policy",
+  "version": "2.0",
+  "effectiveFrom": "2026-08-01T00:00:00.000Z",
+  "requiredFor": [
+   "creator",
+   "brand"
+  ],
+  "signupPrimary": true,
+  "route": "/privacy",
+  "intro": [
+   {
+    "type": "p",
+    "text": "This Policy explains how Dahmion Technologies collects, uses, stores, shares and protects personal data. It is issued in accordance with the Digital Personal Data Protection Act 2023 and the Information Technology Act 2000 and rules thereunder. For the purposes of the DPDP Act, Marqueiver is a Data Fiduciary."
+   }
+  ],
+  "sections": [
+   {
+    "number": "2.1",
+    "heading": "Data we collect",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Account data — name, email address, mobile number, password (stored hashed), role (Creator or Brand).",
+       "Creator profile data — social media handles, city, languages, content categories, portfolio links, self-written profile content, profile photograph.",
+       "Brand data — company name, contact person, work email, telephone, website, industry, city, budget range, GSTIN where provided.",
+       "Financial data — payout details (UPI ID or bank account number and IFSC), PAN, and transaction records. Card details are handled by our payment gateway and are not stored by us.",
+       "Social platform data — public metrics such as follower counts and engagement, and, only where you expressly connect and authorise your account, audience insights such as age, gender and location bands.",
+       "Usage data — log data, device and browser information, IP address, and actions taken on the Platform.",
+       "Communications — messages exchanged through in-platform chat, and correspondence with support."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "2.2",
+    "heading": "How we use data",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "To create and operate your account and provide the Platform.",
+       "To generate AI-assisted profile analysis, category classification, rate suggestions and media-kits for Creators.",
+       "To enable Brands to discover Creators and to facilitate Collaborations.",
+       "To process payments, escrow, payouts, invoicing and tax compliance.",
+       "To provide support, resolve disputes and enforce our policies.",
+       "To detect and prevent fraud, fake engagement and abuse.",
+       "To send service communications and, where you have consented, product updates.",
+       "To comply with legal obligations and respond to lawful requests."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "2.3",
+    "heading": "Legal basis and consent",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "We process personal data on the basis of your consent, given at the point of registration and when you connect a social account, and for legitimate uses permitted under the DPDP Act. Consent may be withdrawn at any time by writing to harsh@marqueiver.com; withdrawal does not affect processing already carried out, and may prevent us from continuing to provide the Platform."
+     }
+    ]
+   },
+   {
+    "number": "2.4",
+    "heading": "What Brands can and cannot see",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "This is a core protection of the Platform. A Creator's telephone number and email address are never disclosed to a Brand. Brands see only profile information a Creator has chosen to publish, together with metrics and analysis. Communication takes place through in-platform chat. Payout details, PAN and private contact information are never visible to Brands."
+     }
+    ]
+   },
+   {
+    "number": "2.5",
+    "heading": "Sharing",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "We share personal data only as follows:"
+     },
+     {
+      "type": "ul",
+      "items": [
+       "Payment partners — to process collections and payouts.",
+       "Infrastructure and service providers — hosting, database, storage, email and SMS delivery, analytics, engaged under contractual confidentiality obligations.",
+       "AI processing — public profile content may be sent to our AI provider for analysis. Private contact details, payout details and PAN are never sent.",
+       "Legal and regulatory — where required by law, court order or a lawful government request.",
+       "Business transfer — in connection with a merger, acquisition or reorganisation, subject to equivalent protection."
+      ]
+     },
+     {
+      "type": "p",
+      "text": "We do not sell personal data."
+     }
+    ]
+   },
+   {
+    "number": "2.6",
+    "heading": "Storage, location and retention",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Data is stored on servers located in India (Mumbai region). We retain account data for as long as your account is active and thereafter as required for legal, tax and dispute-resolution purposes, typically eight years for financial records. Deletion requests are handled under clause 2.8."
+     }
+    ]
+   },
+   {
+    "number": "2.7",
+    "heading": "Security",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "We apply reasonable security safeguards including encryption in transit, hashed credentials, access controls and role-based restrictions on internal access. No system is entirely secure; in the event of a personal data breach we will notify the Data Protection Board of India and affected users as required under the DPDP Act."
+     }
+    ]
+   },
+   {
+    "number": "2.8",
+    "heading": "Your rights",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Access — obtain a summary of the personal data we hold about you.",
+       "Correction — have inaccurate or incomplete data corrected.",
+       "Erasure — request deletion of your data, subject to legal retention requirements.",
+       "Withdrawal of consent — as described in clause 2.3.",
+       "Grievance redressal — raise a complaint with our Grievance Officer, and thereafter with the Data Protection Board of India."
+      ]
+     },
+     {
+      "type": "p",
+      "text": "Requests may be made to harsh@marqueiver.com and will be actioned within 30 days."
+     }
+    ]
+   },
+   {
+    "number": "2.9",
+    "heading": "Cookies",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "We use cookies and similar technologies for authentication, session management, preferences and analytics. Essential cookies are required for the Platform to function. You may control non-essential cookies through your browser or our cookie banner where provided."
+     }
+    ]
+   },
+   {
+    "number": "2.10",
+    "heading": "Children",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "The Platform is not directed at persons under 18. We do not knowingly process the personal data of children. If we become aware that we hold such data, we will delete it."
+     }
+    ]
+   },
+   {
+    "number": "2.11",
+    "heading": "Grievance Officer",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Harsh Bardhan, harsh@marqueiver.com, New Delhi, India. Complaints acknowledged within 24 hours and resolved within 15 days."
+     }
+    ]
+   }
+  ],
+  "body": "This Policy explains how Dahmion Technologies collects, uses, stores, shares and protects personal data. It is issued in accordance with the Digital Personal Data Protection Act 2023 and the Information Technology Act 2000 and rules thereunder. For the purposes of the DPDP Act, Marqueiver is a Data Fiduciary.\n\n## 2.1 Data we collect\n\n- Account data — name, email address, mobile number, password (stored hashed), role (Creator or Brand).\n- Creator profile data — social media handles, city, languages, content categories, portfolio links, self-written profile content, profile photograph.\n- Brand data — company name, contact person, work email, telephone, website, industry, city, budget range, GSTIN where provided.\n- Financial data — payout details (UPI ID or bank account number and IFSC), PAN, and transaction records. Card details are handled by our payment gateway and are not stored by us.\n- Social platform data — public metrics such as follower counts and engagement, and, only where you expressly connect and authorise your account, audience insights such as age, gender and location bands.\n- Usage data — log data, device and browser information, IP address, and actions taken on the Platform.\n- Communications — messages exchanged through in-platform chat, and correspondence with support.\n\n## 2.2 How we use data\n\n- To create and operate your account and provide the Platform.\n- To generate AI-assisted profile analysis, category classification, rate suggestions and media-kits for Creators.\n- To enable Brands to discover Creators and to facilitate Collaborations.\n- To process payments, escrow, payouts, invoicing and tax compliance.\n- To provide support, resolve disputes and enforce our policies.\n- To detect and prevent fraud, fake engagement and abuse.\n- To send service communications and, where you have consented, product updates.\n- To comply with legal obligations and respond to lawful requests.\n\n## 2.3 Legal basis and consent\n\nWe process personal data on the basis of your consent, given at the point of registration and when you connect a social account, and for legitimate uses permitted under the DPDP Act. Consent may be withdrawn at any time by writing to harsh@marqueiver.com; withdrawal does not affect processing already carried out, and may prevent us from continuing to provide the Platform.\n\n## 2.4 What Brands can and cannot see\n\nThis is a core protection of the Platform. A Creator's telephone number and email address are never disclosed to a Brand. Brands see only profile information a Creator has chosen to publish, together with metrics and analysis. Communication takes place through in-platform chat. Payout details, PAN and private contact information are never visible to Brands.\n\n## 2.5 Sharing\n\nWe share personal data only as follows:\n\n- Payment partners — to process collections and payouts.\n- Infrastructure and service providers — hosting, database, storage, email and SMS delivery, analytics, engaged under contractual confidentiality obligations.\n- AI processing — public profile content may be sent to our AI provider for analysis. Private contact details, payout details and PAN are never sent.\n- Legal and regulatory — where required by law, court order or a lawful government request.\n- Business transfer — in connection with a merger, acquisition or reorganisation, subject to equivalent protection.\n\nWe do not sell personal data.\n\n## 2.6 Storage, location and retention\n\nData is stored on servers located in India (Mumbai region). We retain account data for as long as your account is active and thereafter as required for legal, tax and dispute-resolution purposes, typically eight years for financial records. Deletion requests are handled under clause 2.8.\n\n## 2.7 Security\n\nWe apply reasonable security safeguards including encryption in transit, hashed credentials, access controls and role-based restrictions on internal access. No system is entirely secure; in the event of a personal data breach we will notify the Data Protection Board of India and affected users as required under the DPDP Act.\n\n## 2.8 Your rights\n\n- Access — obtain a summary of the personal data we hold about you.\n- Correction — have inaccurate or incomplete data corrected.\n- Erasure — request deletion of your data, subject to legal retention requirements.\n- Withdrawal of consent — as described in clause 2.3.\n- Grievance redressal — raise a complaint with our Grievance Officer, and thereafter with the Data Protection Board of India.\n\nRequests may be made to harsh@marqueiver.com and will be actioned within 30 days.\n\n## 2.9 Cookies\n\nWe use cookies and similar technologies for authentication, session management, preferences and analytics. Essential cookies are required for the Platform to function. You may control non-essential cookies through your browser or our cookie banner where provided.\n\n## 2.10 Children\n\nThe Platform is not directed at persons under 18. We do not knowingly process the personal data of children. If we become aware that we hold such data, we will delete it.\n\n## 2.11 Grievance Officer\n\nHarsh Bardhan, harsh@marqueiver.com, New Delhi, India. Complaints acknowledged within 24 hours and resolved within 15 days."
+ },
+ {
+  "slug": "creator-policy",
+  "number": 3,
+  "title": "Creator Policy",
+  "version": "2.0",
+  "effectiveFrom": "2026-08-01T00:00:00.000Z",
+  "requiredFor": [
+   "creator"
+  ],
+  "signupPrimary": true,
+  "route": "/creator-policy",
+  "intro": [
+   {
+    "type": "p",
+    "text": "This Policy sets out the eligibility criteria, obligations and standards of conduct that apply to Creators on the Marqueiver platform. It supplements the Terms & Conditions."
+   }
+  ],
+  "sections": [
+   {
+    "number": "3.1",
+    "heading": "Eligibility",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "You must be at least 18 years old and resident in India (unless we agree otherwise in writing).",
+       "You must own, or be lawfully authorised to represent, each social media account you connect or declare.",
+       "Your accounts must be genuine, active and publicly accessible for the metrics you present.",
+       "You must have the legal right to enter into commercial arrangements and receive payment."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "3.2",
+    "heading": "Accuracy of information",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "You must ensure that all information on your profile is truthful and current. This includes follower counts, engagement figures, languages, location, categories and portfolio work. Where figures are self-reported and not verified through a connected account, they are displayed as such. Knowingly presenting false or inflated metrics is a serious breach (see Policy 11)."
+     }
+    ]
+   },
+   {
+    "number": "3.3",
+    "heading": "Consent to be discovered",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "By publishing a profile you consent to that profile being displayed to Brands on the Platform, and to Brands contacting you through in-platform chat. You may unpublish your profile at any time, which removes you from discovery but does not affect Collaborations already in progress."
+     }
+    ]
+   },
+   {
+    "number": "3.4",
+    "heading": "AI-generated analysis",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "The Platform generates category classification, tone and language analysis, brand-fit suggestions, a media-kit and an indicative rate card from your public content. These outputs are estimates provided to assist you and Brands. They are not guarantees of performance or price. You may edit or supplement them with your own information, and you remain responsible for the accuracy of anything you add."
+     }
+    ]
+   },
+   {
+    "number": "3.5",
+    "heading": "Responding to briefs",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Respond to briefs within 72 hours where possible, by accepting or declining.",
+       "Do not accept a brief you do not intend, or are not able, to fulfil.",
+       "Raise questions on scope, deliverables and timelines before accepting, not after."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "3.6",
+    "heading": "Delivering work",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Deliver the agreed content within the agreed timeline and to the agreed specification.",
+       "Submit deliverables through the Platform so that the record and escrow release are properly triggered.",
+       "Provide a reasonable number of revisions where these are within the originally agreed scope, as set out in Policy 5.",
+       "Keep the content live for the minimum period agreed with the Brand.",
+       "Comply with all disclosure requirements under Policy 15."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "3.7",
+    "heading": "Professional conduct",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Communicate respectfully and professionally at all times.",
+       "Do not disclose confidential Brand information, unreleased products or campaign details before the agreed date.",
+       "Do not promote a directly competing brand during any agreed exclusivity period.",
+       "Do not solicit payment or communication outside the Platform (Policy 1.5)."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "3.8",
+    "heading": "Payment and payout details",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "You must provide accurate payout details (UPI ID or bank account and IFSC) and PAN. Payouts are made only to an account in your own name. Marqueiver is not responsible for delay or loss caused by incorrect details you have supplied. Tax will be deducted at source where required by law."
+     }
+    ]
+   },
+   {
+    "number": "3.9",
+    "heading": "Optional paid features",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Creators may join and use the Platform free of charge. Optional paid tiers provide additional visibility such as priority placement and a profile badge. Paid tiers affect placement and presentation only. They do not guarantee brand interest, briefs, Collaborations or income."
+     }
+    ]
+   },
+   {
+    "number": "3.10",
+    "heading": "Consequences of breach",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Breach of this Policy may result in reduced visibility, removal of a profile from discovery, withholding of payment pending investigation, suspension or termination, as set out in Policy 12."
+     }
+    ]
+   }
+  ],
+  "body": "This Policy sets out the eligibility criteria, obligations and standards of conduct that apply to Creators on the Marqueiver platform. It supplements the Terms & Conditions.\n\n## 3.1 Eligibility\n\n- You must be at least 18 years old and resident in India (unless we agree otherwise in writing).\n- You must own, or be lawfully authorised to represent, each social media account you connect or declare.\n- Your accounts must be genuine, active and publicly accessible for the metrics you present.\n- You must have the legal right to enter into commercial arrangements and receive payment.\n\n## 3.2 Accuracy of information\n\nYou must ensure that all information on your profile is truthful and current. This includes follower counts, engagement figures, languages, location, categories and portfolio work. Where figures are self-reported and not verified through a connected account, they are displayed as such. Knowingly presenting false or inflated metrics is a serious breach (see Policy 11).\n\n## 3.3 Consent to be discovered\n\nBy publishing a profile you consent to that profile being displayed to Brands on the Platform, and to Brands contacting you through in-platform chat. You may unpublish your profile at any time, which removes you from discovery but does not affect Collaborations already in progress.\n\n## 3.4 AI-generated analysis\n\nThe Platform generates category classification, tone and language analysis, brand-fit suggestions, a media-kit and an indicative rate card from your public content. These outputs are estimates provided to assist you and Brands. They are not guarantees of performance or price. You may edit or supplement them with your own information, and you remain responsible for the accuracy of anything you add.\n\n## 3.5 Responding to briefs\n\n- Respond to briefs within 72 hours where possible, by accepting or declining.\n- Do not accept a brief you do not intend, or are not able, to fulfil.\n- Raise questions on scope, deliverables and timelines before accepting, not after.\n\n## 3.6 Delivering work\n\n- Deliver the agreed content within the agreed timeline and to the agreed specification.\n- Submit deliverables through the Platform so that the record and escrow release are properly triggered.\n- Provide a reasonable number of revisions where these are within the originally agreed scope, as set out in Policy 5.\n- Keep the content live for the minimum period agreed with the Brand.\n- Comply with all disclosure requirements under Policy 15.\n\n## 3.7 Professional conduct\n\n- Communicate respectfully and professionally at all times.\n- Do not disclose confidential Brand information, unreleased products or campaign details before the agreed date.\n- Do not promote a directly competing brand during any agreed exclusivity period.\n- Do not solicit payment or communication outside the Platform (Policy 1.5).\n\n## 3.8 Payment and payout details\n\nYou must provide accurate payout details (UPI ID or bank account and IFSC) and PAN. Payouts are made only to an account in your own name. Marqueiver is not responsible for delay or loss caused by incorrect details you have supplied. Tax will be deducted at source where required by law.\n\n## 3.9 Optional paid features\n\nCreators may join and use the Platform free of charge. Optional paid tiers provide additional visibility such as priority placement and a profile badge. Paid tiers affect placement and presentation only. They do not guarantee brand interest, briefs, Collaborations or income.\n\n## 3.10 Consequences of breach\n\nBreach of this Policy may result in reduced visibility, removal of a profile from discovery, withholding of payment pending investigation, suspension or termination, as set out in Policy 12."
+ },
+ {
+  "slug": "brand-policy",
+  "number": 4,
+  "title": "Brand Policy",
+  "version": "2.0",
+  "effectiveFrom": "2026-08-01T00:00:00.000Z",
+  "requiredFor": [
+   "brand"
+  ],
+  "signupPrimary": true,
+  "route": "/brand-policy",
+  "intro": [
+   {
+    "type": "p",
+    "text": "This Policy sets out the obligations that apply to Brands, agencies and other business users engaging Creators through Marqueiver. It supplements the Terms & Conditions."
+   }
+  ],
+  "sections": [
+   {
+    "number": "4.1",
+    "heading": "Eligibility and verification",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "You must be a genuine business, agency or individual with authority to commission marketing content.",
+       "You must provide accurate company details, and GSTIN where applicable, for invoicing.",
+       "We may require verification of your business before enabling certain features (Policy 13)."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "4.2",
+    "heading": "Use of Creator information",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Creator information accessed through the Platform, including handles, metrics, audience analysis and contact through chat, is provided for the purpose of evaluating and conducting Collaborations on Marqueiver. You must not:"
+     },
+     {
+      "type": "ul",
+      "items": [
+       "Export, scrape, resell, publish or share Creator data with third parties.",
+       "Use Creator information to build or supplement a competing database.",
+       "Contact a Creator outside the Platform in order to avoid platform fees.",
+       "Use Creator information for any purpose unrelated to a genuine Collaboration."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "4.3",
+    "heading": "Credits",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Access to Creator information is provided through prepaid Credits. Credits are purchased in advance, are consumed when you choose to reveal information, and are governed by Policy 6. Credits carry no cash value except as expressly provided in that Policy."
+     }
+    ]
+   },
+   {
+    "number": "4.4",
+    "heading": "Briefs and campaigns",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Provide a clear brief: deliverables, format, timeline, messaging requirements, budget and any exclusivity.",
+       "Do not send briefs you are not genuinely prepared to fund and complete.",
+       "Respond to Creator questions and submitted work within a reasonable period, and in any event within the timelines in Policy 5.",
+       "Do not require a Creator to make false, misleading or unsubstantiated claims about a product or service.",
+       "Do not require a Creator to conceal the commercial nature of a paid partnership (Policy 15)."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "4.5",
+    "heading": "Funding and payment",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Collaboration amounts must be funded in full into escrow before work commences. Payment is released to the Creator upon your approval, or automatically as provided in Policy 5. Withholding approval without reasonable cause is a breach of this Policy."
+     }
+    ]
+   },
+   {
+    "number": "4.6",
+    "heading": "Content usage",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Your rights to use content produced by a Creator are determined by the licence agreed for that Collaboration, as set out in Policy 8. Use beyond the agreed scope, duration or media requires separate agreement and may attract additional fees."
+     }
+    ]
+   },
+   {
+    "number": "4.7",
+    "heading": "Professional conduct",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Communicate respectfully and professionally, and do not make unreasonable demands outside the agreed scope.",
+       "Do not request unpaid work, unpaid trials or speculative content.",
+       "Do not discriminate against Creators on the basis of religion, caste, gender, sexual orientation, disability or region.",
+       "Do not use the review system to pressure a Creator into unpaid additional work."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "4.8",
+    "heading": "Consequences of breach",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Breach may result in loss of access to Creator information, forfeiture of Credits in cases of misuse, suspension or termination, and recovery of fees avoided, as set out in Policy 12."
+     }
+    ]
+   }
+  ],
+  "body": "This Policy sets out the obligations that apply to Brands, agencies and other business users engaging Creators through Marqueiver. It supplements the Terms & Conditions.\n\n## 4.1 Eligibility and verification\n\n- You must be a genuine business, agency or individual with authority to commission marketing content.\n- You must provide accurate company details, and GSTIN where applicable, for invoicing.\n- We may require verification of your business before enabling certain features (Policy 13).\n\n## 4.2 Use of Creator information\n\nCreator information accessed through the Platform, including handles, metrics, audience analysis and contact through chat, is provided for the purpose of evaluating and conducting Collaborations on Marqueiver. You must not:\n\n- Export, scrape, resell, publish or share Creator data with third parties.\n- Use Creator information to build or supplement a competing database.\n- Contact a Creator outside the Platform in order to avoid platform fees.\n- Use Creator information for any purpose unrelated to a genuine Collaboration.\n\n## 4.3 Credits\n\nAccess to Creator information is provided through prepaid Credits. Credits are purchased in advance, are consumed when you choose to reveal information, and are governed by Policy 6. Credits carry no cash value except as expressly provided in that Policy.\n\n## 4.4 Briefs and campaigns\n\n- Provide a clear brief: deliverables, format, timeline, messaging requirements, budget and any exclusivity.\n- Do not send briefs you are not genuinely prepared to fund and complete.\n- Respond to Creator questions and submitted work within a reasonable period, and in any event within the timelines in Policy 5.\n- Do not require a Creator to make false, misleading or unsubstantiated claims about a product or service.\n- Do not require a Creator to conceal the commercial nature of a paid partnership (Policy 15).\n\n## 4.5 Funding and payment\n\nCollaboration amounts must be funded in full into escrow before work commences. Payment is released to the Creator upon your approval, or automatically as provided in Policy 5. Withholding approval without reasonable cause is a breach of this Policy.\n\n## 4.6 Content usage\n\nYour rights to use content produced by a Creator are determined by the licence agreed for that Collaboration, as set out in Policy 8. Use beyond the agreed scope, duration or media requires separate agreement and may attract additional fees.\n\n## 4.7 Professional conduct\n\n- Communicate respectfully and professionally, and do not make unreasonable demands outside the agreed scope.\n- Do not request unpaid work, unpaid trials or speculative content.\n- Do not discriminate against Creators on the basis of religion, caste, gender, sexual orientation, disability or region.\n- Do not use the review system to pressure a Creator into unpaid additional work.\n\n## 4.8 Consequences of breach\n\nBreach may result in loss of access to Creator information, forfeiture of Credits in cases of misuse, suspension or termination, and recovery of fees avoided, as set out in Policy 12."
+ },
+ {
+  "slug": "campaign-collaboration-policy",
+  "number": 5,
+  "title": "Campaign & Collaboration Policy",
+  "version": "2.0",
+  "effectiveFrom": "2026-08-01T00:00:00.000Z",
+  "requiredFor": [
+   "creator",
+   "brand"
+  ],
+  "signupPrimary": false,
+  "route": null,
+  "intro": [
+   {
+    "type": "p",
+    "text": "This Policy governs the responsibilities of both parties once a brief has been accepted and a Collaboration has commenced. It is intended to make expectations explicit and to provide a predictable process where things go wrong."
+   }
+  ],
+  "sections": [
+   {
+    "number": "5.1",
+    "heading": "Lifecycle of a Collaboration",
+    "blocks": [
+     {
+      "type": "table",
+      "head": [
+       "Stage",
+       "What happens"
+      ],
+      "rows": [
+       [
+        "Invitation",
+        "Brand sends a brief to a Creator specifying deliverables, timeline and fee."
+       ],
+       [
+        "Negotiation",
+        "Either party may propose changes. Nothing is binding until acceptance."
+       ],
+       [
+        "Acceptance",
+        "Both parties agree scope, fee and timeline. Terms are recorded on the Platform."
+       ],
+       [
+        "Escrow funding",
+        "Brand funds the agreed amount in full. Work should not begin before this."
+       ],
+       [
+        "In progress",
+        "Creator produces the content within the agreed timeline."
+       ],
+       [
+        "Submission",
+        "Creator submits deliverables through the Platform."
+       ],
+       [
+        "Review",
+        "Brand approves, or requests revisions within scope, within 7 days."
+       ],
+       [
+        "Completion",
+        "Content is published as agreed and payment is released to the Creator."
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "number": "5.2",
+    "heading": "Scope",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "The agreed scope is that recorded on the Platform at the point of acceptance. Any change to deliverables, timeline, usage rights or exclusivity must be agreed in writing through the Platform and, where it increases the work required, may attract an additional fee."
+     }
+    ]
+   },
+   {
+    "number": "5.3",
+    "heading": "Timelines and review",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "A Creator should deliver by the agreed date and must notify the Brand promptly if delay is unavoidable.",
+       "A Brand must review submitted work within 7 days and either approve it or request revisions within scope.",
+       "Automatic completion — if a Brand neither approves nor requests revisions within 7 days of submission, the Collaboration is treated as completed and payment is released to the Creator. This protects Creators from indefinite delay."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "5.4",
+    "heading": "Revisions",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Unless otherwise agreed, a Creator will provide up to two rounds of revision where the request is within the originally agreed scope. A request that materially changes the concept, format, messaging, platform or deliverable count is a new scope, not a revision, and may be charged separately."
+     },
+     {
+      "type": "p",
+      "text": "A request for revision must be specific and must identify what in the submitted work does not meet the agreed brief. A rejection expressed only as dissatisfaction, without identifying a departure from the brief, is not a valid revision request. Where a Brand does not provide specific written reasons within 7 days of submission, the Collaboration is treated as approved under clause 5.3."
+     }
+    ]
+   },
+   {
+    "number": "5.5",
+    "heading": "Where content is still not approved after the agreed revisions",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "This clause applies where the Creator has delivered the original work and completed the agreed rounds of revision, and the Brand still declines to approve. The Collaboration moves to Resolution. Neither party is required to continue working, and the Creator is not required to produce further revisions without additional payment."
+     },
+     {
+      "type": "p",
+      "text": "The governing principle is that a Brand may not obtain unlimited work by repeatedly withholding approval, and a Creator may not be paid in full for work that does not meet the agreed brief. The parties may settle the matter themselves under options A to C, failing which either may escalate under option D."
+     },
+     {
+      "type": "table",
+      "head": [
+       "Option",
+       "What happens",
+       "Money"
+      ],
+      "rows": [
+       [
+        "A. Accept at a reduced fee",
+        "The Brand accepts and uses the work as delivered, at a fee reduced by agreement.",
+        "Agreed reduced amount released to the Creator; balance refunded."
+       ],
+       [
+        "B. Further paid revision",
+        "The Brand requests additional changes and the Creator agrees to make them. Charged as new scope.",
+        "Original amount held; additional fee funded before further work begins."
+       ],
+       [
+        "C. Release without use (default settlement)",
+        "Neither party wishes to continue. The Collaboration ends. The Brand receives no licence and must not use the work in any form.",
+        "50% of the agreed fee released to the Creator for work performed; 50% refunded to the Brand."
+       ],
+       [
+        "D. Escalate to dispute",
+        "Either party refers the matter to Marqueiver under Policy 10.",
+        "Funds held until determination."
+       ]
+      ]
+     },
+     {
+      "type": "p",
+      "text": "If the parties do not agree on A, B or C within 7 days of the final revision being rejected, option C applies automatically, unless either party has escalated under option D."
+     }
+    ]
+   },
+   {
+    "number": "5.6",
+    "heading": "How a dispute over rejected content is determined",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Where the matter is escalated, Marqueiver assesses the submitted work against the brief recorded at the point of acceptance, together with the in-platform record of the revision requests. Our determination follows these principles:"
+     },
+     {
+      "type": "table",
+      "head": [
+       "Finding",
+       "Outcome"
+      ],
+      "rows": [
+       [
+        "The work materially meets the agreed brief; the objection is one of taste or preference",
+        "Full payment released to the Creator. The Brand may use the work."
+       ],
+       [
+        "The work meets the brief in part; some agreed elements are missing or incomplete",
+        "Partial release, usually between 50% and 75%, reflecting the work properly performed."
+       ],
+       [
+        "The work materially fails the agreed brief — for example wrong product, wrong format, wrong platform, or unusable quality",
+        "Full refund to the Brand, or one final opportunity to correct where the Creator requests it."
+       ],
+       [
+        "The brief was unclear, or the Brand changed its requirements after acceptance",
+        "Full or substantially full payment to the Creator. Ambiguity and changes of mind are the Brand's risk, not the Creator's."
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "number": "5.7",
+    "heading": "Protections against misuse",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "A Brand that declines to approve work has no licence to use it. Publishing, adapting or otherwise using rejected content makes the full agreed fee immediately payable, in addition to any remedy for breach of Policy 8.",
+       "Repeatedly rejecting work after full revision cycles, across multiple Collaborations, is treated as an attempt to obtain unpaid work and may result in restriction or suspension under Policy 12.",
+       "A Creator who submits work plainly unrelated to the brief, or who submits the same work unchanged in response to a valid revision request, is not entitled to the settlement in option C.",
+       "Where a Brand supplied a product for review or use, and the Collaboration ends under this clause, the Brand may request its return at its own cost unless the item was consumed in good faith performance of the brief."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "5.8",
+    "heading": "Publication and content longevity",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Where publication is a deliverable, the Creator must publish on the agreed platform, at the agreed time, with the disclosures required by Policy 15. Unless otherwise agreed, published content must remain live for a minimum of 30 days. Early removal without cause may result in partial or full refund to the Brand."
+     }
+    ]
+   },
+   {
+    "number": "5.9",
+    "heading": "Performance",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Neither Marqueiver nor the Creator guarantees any level of reach, engagement, conversion or sales. Payment is for the agreed deliverables, not for a commercial outcome, unless the parties have expressly agreed a performance-based arrangement."
+     }
+    ]
+   },
+   {
+    "number": "5.10",
+    "heading": "Confidentiality",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Campaign details, unreleased products and any information marked confidential must not be disclosed before the agreed publication date, and thereafter only to the extent published."
+     }
+    ]
+   },
+   {
+    "number": "5.11",
+    "heading": "Failure to perform",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "If a Creator fails to deliver by the agreed date and does not agree a revised date, the Brand may cancel and receive a refund under Policy 7.",
+       "If a Brand fails to provide materials or information necessary for the work, timelines extend accordingly.",
+       "Persistent failure by either party may lead to action under Policy 12."
+      ]
+     }
+    ]
+   }
+  ],
+  "body": "This Policy governs the responsibilities of both parties once a brief has been accepted and a Collaboration has commenced. It is intended to make expectations explicit and to provide a predictable process where things go wrong.\n\n## 5.1 Lifecycle of a Collaboration\n\nStage | What happens\n--- | ---\nInvitation | Brand sends a brief to a Creator specifying deliverables, timeline and fee.\nNegotiation | Either party may propose changes. Nothing is binding until acceptance.\nAcceptance | Both parties agree scope, fee and timeline. Terms are recorded on the Platform.\nEscrow funding | Brand funds the agreed amount in full. Work should not begin before this.\nIn progress | Creator produces the content within the agreed timeline.\nSubmission | Creator submits deliverables through the Platform.\nReview | Brand approves, or requests revisions within scope, within 7 days.\nCompletion | Content is published as agreed and payment is released to the Creator.\n\n## 5.2 Scope\n\nThe agreed scope is that recorded on the Platform at the point of acceptance. Any change to deliverables, timeline, usage rights or exclusivity must be agreed in writing through the Platform and, where it increases the work required, may attract an additional fee.\n\n## 5.3 Timelines and review\n\n- A Creator should deliver by the agreed date and must notify the Brand promptly if delay is unavoidable.\n- A Brand must review submitted work within 7 days and either approve it or request revisions within scope.\n- Automatic completion — if a Brand neither approves nor requests revisions within 7 days of submission, the Collaboration is treated as completed and payment is released to the Creator. This protects Creators from indefinite delay.\n\n## 5.4 Revisions\n\nUnless otherwise agreed, a Creator will provide up to two rounds of revision where the request is within the originally agreed scope. A request that materially changes the concept, format, messaging, platform or deliverable count is a new scope, not a revision, and may be charged separately.\n\nA request for revision must be specific and must identify what in the submitted work does not meet the agreed brief. A rejection expressed only as dissatisfaction, without identifying a departure from the brief, is not a valid revision request. Where a Brand does not provide specific written reasons within 7 days of submission, the Collaboration is treated as approved under clause 5.3.\n\n## 5.5 Where content is still not approved after the agreed revisions\n\nThis clause applies where the Creator has delivered the original work and completed the agreed rounds of revision, and the Brand still declines to approve. The Collaboration moves to Resolution. Neither party is required to continue working, and the Creator is not required to produce further revisions without additional payment.\n\nThe governing principle is that a Brand may not obtain unlimited work by repeatedly withholding approval, and a Creator may not be paid in full for work that does not meet the agreed brief. The parties may settle the matter themselves under options A to C, failing which either may escalate under option D.\n\nOption | What happens | Money\n--- | --- | ---\nA. Accept at a reduced fee | The Brand accepts and uses the work as delivered, at a fee reduced by agreement. | Agreed reduced amount released to the Creator; balance refunded.\nB. Further paid revision | The Brand requests additional changes and the Creator agrees to make them. Charged as new scope. | Original amount held; additional fee funded before further work begins.\nC. Release without use (default settlement) | Neither party wishes to continue. The Collaboration ends. The Brand receives no licence and must not use the work in any form. | 50% of the agreed fee released to the Creator for work performed; 50% refunded to the Brand.\nD. Escalate to dispute | Either party refers the matter to Marqueiver under Policy 10. | Funds held until determination.\n\nIf the parties do not agree on A, B or C within 7 days of the final revision being rejected, option C applies automatically, unless either party has escalated under option D.\n\n## 5.6 How a dispute over rejected content is determined\n\nWhere the matter is escalated, Marqueiver assesses the submitted work against the brief recorded at the point of acceptance, together with the in-platform record of the revision requests. Our determination follows these principles:\n\nFinding | Outcome\n--- | ---\nThe work materially meets the agreed brief; the objection is one of taste or preference | Full payment released to the Creator. The Brand may use the work.\nThe work meets the brief in part; some agreed elements are missing or incomplete | Partial release, usually between 50% and 75%, reflecting the work properly performed.\nThe work materially fails the agreed brief — for example wrong product, wrong format, wrong platform, or unusable quality | Full refund to the Brand, or one final opportunity to correct where the Creator requests it.\nThe brief was unclear, or the Brand changed its requirements after acceptance | Full or substantially full payment to the Creator. Ambiguity and changes of mind are the Brand's risk, not the Creator's.\n\n## 5.7 Protections against misuse\n\n- A Brand that declines to approve work has no licence to use it. Publishing, adapting or otherwise using rejected content makes the full agreed fee immediately payable, in addition to any remedy for breach of Policy 8.\n- Repeatedly rejecting work after full revision cycles, across multiple Collaborations, is treated as an attempt to obtain unpaid work and may result in restriction or suspension under Policy 12.\n- A Creator who submits work plainly unrelated to the brief, or who submits the same work unchanged in response to a valid revision request, is not entitled to the settlement in option C.\n- Where a Brand supplied a product for review or use, and the Collaboration ends under this clause, the Brand may request its return at its own cost unless the item was consumed in good faith performance of the brief.\n\n## 5.8 Publication and content longevity\n\nWhere publication is a deliverable, the Creator must publish on the agreed platform, at the agreed time, with the disclosures required by Policy 15. Unless otherwise agreed, published content must remain live for a minimum of 30 days. Early removal without cause may result in partial or full refund to the Brand.\n\n## 5.9 Performance\n\nNeither Marqueiver nor the Creator guarantees any level of reach, engagement, conversion or sales. Payment is for the agreed deliverables, not for a commercial outcome, unless the parties have expressly agreed a performance-based arrangement.\n\n## 5.10 Confidentiality\n\nCampaign details, unreleased products and any information marked confidential must not be disclosed before the agreed publication date, and thereafter only to the extent published.\n\n## 5.11 Failure to perform\n\n- If a Creator fails to deliver by the agreed date and does not agree a revised date, the Brand may cancel and receive a refund under Policy 7.\n- If a Brand fails to provide materials or information necessary for the work, timelines extend accordingly.\n- Persistent failure by either party may lead to action under Policy 12."
+ },
+ {
+  "slug": "payment-escrow-policy",
+  "number": 6,
+  "title": "Payment & Refund Policy",
+  "version": "2.0",
+  "effectiveFrom": "2026-08-01T00:00:00.000Z",
+  "requiredFor": [
+   "creator",
+   "brand"
+  ],
+  "signupPrimary": false,
+  "route": null,
+  "intro": [
+   {
+    "type": "p",
+    "text": "This Policy explains how money moves through the Platform: Credits purchased by Brands, funding and release of Collaboration payments, refunds, and the treatment of taxes."
+   }
+  ],
+  "sections": [
+   {
+    "number": "6.1",
+    "heading": "Credits",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Credits are prepaid units purchased by Brands to access Creator information on the Platform.",
+       "Credits are consumed at the point you choose to reveal information. Once information has been revealed, the Credits consumed are non-refundable.",
+       "Credits are valid for 12 months from the date of purchase and are extended on any subsequent purchase.",
+       "Unused Credits may be refunded within 7 days of purchase, less the value of any Credits already consumed.",
+       "Credits are not transferable between accounts, carry no interest, and may not be exchanged for cash except as set out above."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "6.2",
+    "heading": "Collaboration payments and escrow",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Collaboration amounts are funded by the Brand before work commences and are held by our payment partner until release. Funds are released to the Creator upon Brand approval, upon automatic completion under Policy 5.3, or upon determination of a dispute under Policy 10."
+     }
+    ]
+   },
+   {
+    "number": "6.3",
+    "heading": "Platform commission",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Marqueiver charges a platform commission of 12.5% of the Collaboration value. Commission is deducted at the point of release, so the Creator receives the agreed amount less the commission and any statutory deductions. Commission is set out in full in Policy 14."
+     }
+    ]
+   },
+   {
+    "number": "6.4",
+    "heading": "Payouts to Creators",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Payouts are made to the UPI ID or bank account registered in the Creator's own name.",
+       "Payouts are initiated within 3 working days of release and typically settle within a further 2 working days, subject to banking timelines.",
+       "Marqueiver is not liable for delay or loss caused by incorrect payout details supplied by the Creator."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "6.5",
+    "heading": "Refunds to Brands",
+    "blocks": [
+     {
+      "type": "table",
+      "head": [
+       "Situation",
+       "Outcome"
+      ],
+      "rows": [
+       [
+        "Creator declines or does not respond",
+        "Full refund of the escrowed amount."
+       ],
+       [
+        "Cancelled before work begins",
+        "Full refund of the escrowed amount."
+       ],
+       [
+        "Cancelled after work has begun",
+        "Pro-rata settlement — see Policy 7."
+       ],
+       [
+        "Creator fails to deliver",
+        "Full refund, subject to review."
+       ],
+       [
+        "Deliverables materially not as agreed",
+        "Full or partial refund on determination under Policy 10."
+       ],
+       [
+        "Brand changes its mind after delivery",
+        "No refund. Work has been performed."
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "number": "6.6",
+    "heading": "Taxes — current position",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Marqueiver is not presently registered under GST. No GST is charged on Credits, on Collaboration amounts, or on the platform commission. The amounts displayed on the Platform are the amounts payable in full."
+     }
+    ]
+   },
+   {
+    "number": "6.7",
+    "heading": "Taxes — when GST becomes applicable",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Marqueiver will register under GST when required to do so, and expects to do so as paid transactions commence on the Platform. The following applies from the date of registration:"
+     },
+     {
+      "type": "ul",
+      "items": [
+       "All amounts displayed on the Platform are quoted exclusive of taxes. Where GST becomes applicable, it will be charged in addition to the displayed amount at the prevailing statutory rate.",
+       "We will give at least 15 days' notice by email and in-platform notice before tax is first charged, and this Policy will be updated to state our GSTIN.",
+       "Credits already purchased will not be taxed retrospectively, and may be used in full.",
+       "Collaborations already accepted and funded will not be taxed retrospectively.",
+       "From the date of registration, a tax invoice will be issued in place of a payment receipt, and Brands should provide their GSTIN to claim input credit where eligible."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "6.8",
+    "heading": "Deduction of tax at source",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Tax is deducted from Creator payouts only where required by law, including under Sections 194-O and 194R of the Income-tax Act 1961.",
+       "Under Section 194-O, no deduction is presently required for an individual Creator whose gross receipts through the Platform do not exceed ₹5,00,000 in a financial year, provided a valid PAN has been furnished. Most Creators on the Platform are therefore unlikely to see any deduction.",
+       "Creators must provide a valid PAN. Where PAN is not furnished, deduction is made at the higher rate prescribed by law.",
+       "Barter arrangements, gifted products and other non-cash benefits may attract tax in the Creator's hands, including under Section 194R. Creators remain responsible for their own tax affairs and should take independent advice."
+      ]
+     },
+     {
+      "type": "p",
+      "text": "Note for CA review: GST registration is compulsory for an e-commerce operator required to collect TCS under Section 52 of the CGST Act, irrespective of turnover threshold. Confirm the precise trigger date — in practice, when the Platform first collects payment on behalf of Creators — and register before that date. Clauses 6.6 and 6.7 are drafted so that only 6.6 needs replacing at that point."
+     }
+    ]
+   },
+   {
+    "number": "6.9",
+    "heading": "Failed and disputed payments",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Where a payment fails, we will notify you and may retry. Where a chargeback or payment dispute is raised, we may suspend related Collaborations and Credits pending resolution."
+     }
+    ]
+   },
+   {
+    "number": "6.10",
+    "heading": "Currency",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "All transactions are in Indian Rupees (INR)."
+     }
+    ]
+   }
+  ],
+  "body": "This Policy explains how money moves through the Platform: Credits purchased by Brands, funding and release of Collaboration payments, refunds, and the treatment of taxes.\n\n## 6.1 Credits\n\n- Credits are prepaid units purchased by Brands to access Creator information on the Platform.\n- Credits are consumed at the point you choose to reveal information. Once information has been revealed, the Credits consumed are non-refundable.\n- Credits are valid for 12 months from the date of purchase and are extended on any subsequent purchase.\n- Unused Credits may be refunded within 7 days of purchase, less the value of any Credits already consumed.\n- Credits are not transferable between accounts, carry no interest, and may not be exchanged for cash except as set out above.\n\n## 6.2 Collaboration payments and escrow\n\nCollaboration amounts are funded by the Brand before work commences and are held by our payment partner until release. Funds are released to the Creator upon Brand approval, upon automatic completion under Policy 5.3, or upon determination of a dispute under Policy 10.\n\n## 6.3 Platform commission\n\nMarqueiver charges a platform commission of 12.5% of the Collaboration value. Commission is deducted at the point of release, so the Creator receives the agreed amount less the commission and any statutory deductions. Commission is set out in full in Policy 14.\n\n## 6.4 Payouts to Creators\n\n- Payouts are made to the UPI ID or bank account registered in the Creator's own name.\n- Payouts are initiated within 3 working days of release and typically settle within a further 2 working days, subject to banking timelines.\n- Marqueiver is not liable for delay or loss caused by incorrect payout details supplied by the Creator.\n\n## 6.5 Refunds to Brands\n\nSituation | Outcome\n--- | ---\nCreator declines or does not respond | Full refund of the escrowed amount.\nCancelled before work begins | Full refund of the escrowed amount.\nCancelled after work has begun | Pro-rata settlement — see Policy 7.\nCreator fails to deliver | Full refund, subject to review.\nDeliverables materially not as agreed | Full or partial refund on determination under Policy 10.\nBrand changes its mind after delivery | No refund. Work has been performed.\n\n## 6.6 Taxes — current position\n\nMarqueiver is not presently registered under GST. No GST is charged on Credits, on Collaboration amounts, or on the platform commission. The amounts displayed on the Platform are the amounts payable in full.\n\n## 6.7 Taxes — when GST becomes applicable\n\nMarqueiver will register under GST when required to do so, and expects to do so as paid transactions commence on the Platform. The following applies from the date of registration:\n\n- All amounts displayed on the Platform are quoted exclusive of taxes. Where GST becomes applicable, it will be charged in addition to the displayed amount at the prevailing statutory rate.\n- We will give at least 15 days' notice by email and in-platform notice before tax is first charged, and this Policy will be updated to state our GSTIN.\n- Credits already purchased will not be taxed retrospectively, and may be used in full.\n- Collaborations already accepted and funded will not be taxed retrospectively.\n- From the date of registration, a tax invoice will be issued in place of a payment receipt, and Brands should provide their GSTIN to claim input credit where eligible.\n\n## 6.8 Deduction of tax at source\n\n- Tax is deducted from Creator payouts only where required by law, including under Sections 194-O and 194R of the Income-tax Act 1961.\n- Under Section 194-O, no deduction is presently required for an individual Creator whose gross receipts through the Platform do not exceed ₹5,00,000 in a financial year, provided a valid PAN has been furnished. Most Creators on the Platform are therefore unlikely to see any deduction.\n- Creators must provide a valid PAN. Where PAN is not furnished, deduction is made at the higher rate prescribed by law.\n- Barter arrangements, gifted products and other non-cash benefits may attract tax in the Creator's hands, including under Section 194R. Creators remain responsible for their own tax affairs and should take independent advice.\n\nNote for CA review: GST registration is compulsory for an e-commerce operator required to collect TCS under Section 52 of the CGST Act, irrespective of turnover threshold. Confirm the precise trigger date — in practice, when the Platform first collects payment on behalf of Creators — and register before that date. Clauses 6.6 and 6.7 are drafted so that only 6.6 needs replacing at that point.\n\n## 6.9 Failed and disputed payments\n\nWhere a payment fails, we will notify you and may retry. Where a chargeback or payment dispute is raised, we may suspend related Collaborations and Credits pending resolution.\n\n## 6.10 Currency\n\nAll transactions are in Indian Rupees (INR)."
+ },
+ {
+  "slug": "cancellation-refund-policy",
+  "number": 7,
+  "title": "Cancellation Policy",
+  "version": "2.0",
+  "effectiveFrom": "2026-08-01T00:00:00.000Z",
+  "requiredFor": [
+   "creator",
+   "brand"
+  ],
+  "signupPrimary": false,
+  "route": null,
+  "intro": [
+   {
+    "type": "p",
+    "text": "This Policy explains what happens when a Collaboration is cancelled, and how funds are treated at each stage."
+   }
+  ],
+  "sections": [
+   {
+    "number": "7.1",
+    "heading": "Cancellation by a Brand",
+    "blocks": [
+     {
+      "type": "table",
+      "head": [
+       "When cancelled",
+       "Creator receives",
+       "Brand receives"
+      ],
+      "rows": [
+       [
+        "Before Creator accepts",
+        "Nothing",
+        "Full refund"
+       ],
+       [
+        "After acceptance, before work begins",
+        "Nothing",
+        "Full refund"
+       ],
+       [
+        "After work has begun, before submission",
+        "25% of the fee as a cancellation fee",
+        "75% refund"
+       ],
+       [
+        "After submission of deliverables",
+        "Full fee",
+        "No refund"
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "number": "7.2",
+    "heading": "Cancellation by a Creator",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Before acceptance — no consequence; declining a brief is not a cancellation.",
+       "After acceptance but before work begins — the Brand receives a full refund. Repeated cancellations may affect visibility.",
+       "After work has begun — the Brand receives a full refund unless partial deliverables are accepted by the Brand, in which case a pro-rata amount may be agreed.",
+       "After submission — cancellation is not available; the review process in Policy 5 applies."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "7.3",
+    "heading": "Cancellation by Marqueiver",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "We may cancel a Collaboration where we reasonably believe it involves fraud, prohibited activity, illegal products or services, or a serious breach of our policies. In such cases we will refund the Brand unless the Brand is the party at fault, in which case funds may be released to the Creator for work performed."
+     }
+    ]
+   },
+   {
+    "number": "7.4",
+    "heading": "Force majeure",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Neither party is liable for failure to perform caused by events beyond reasonable control, including natural disaster, civil unrest, government action, platform-wide outage or serious illness. The parties should agree a revised timeline; if that is not possible, the Collaboration may be cancelled with a full refund."
+     }
+    ]
+   },
+   {
+    "number": "7.5",
+    "heading": "Effect of cancellation",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Escrowed funds are dealt with as set out above.",
+       "Any licence to use content granted for that Collaboration terminates, save for content already lawfully published and paid for.",
+       "Credits already consumed to reveal Creator information are not refunded."
+      ]
+     }
+    ]
+   }
+  ],
+  "body": "This Policy explains what happens when a Collaboration is cancelled, and how funds are treated at each stage.\n\n## 7.1 Cancellation by a Brand\n\nWhen cancelled | Creator receives | Brand receives\n--- | --- | ---\nBefore Creator accepts | Nothing | Full refund\nAfter acceptance, before work begins | Nothing | Full refund\nAfter work has begun, before submission | 25% of the fee as a cancellation fee | 75% refund\nAfter submission of deliverables | Full fee | No refund\n\n## 7.2 Cancellation by a Creator\n\n- Before acceptance — no consequence; declining a brief is not a cancellation.\n- After acceptance but before work begins — the Brand receives a full refund. Repeated cancellations may affect visibility.\n- After work has begun — the Brand receives a full refund unless partial deliverables are accepted by the Brand, in which case a pro-rata amount may be agreed.\n- After submission — cancellation is not available; the review process in Policy 5 applies.\n\n## 7.3 Cancellation by Marqueiver\n\nWe may cancel a Collaboration where we reasonably believe it involves fraud, prohibited activity, illegal products or services, or a serious breach of our policies. In such cases we will refund the Brand unless the Brand is the party at fault, in which case funds may be released to the Creator for work performed.\n\n## 7.4 Force majeure\n\nNeither party is liable for failure to perform caused by events beyond reasonable control, including natural disaster, civil unrest, government action, platform-wide outage or serious illness. The parties should agree a revised timeline; if that is not possible, the Collaboration may be cancelled with a full refund.\n\n## 7.5 Effect of cancellation\n\n- Escrowed funds are dealt with as set out above.\n- Any licence to use content granted for that Collaboration terminates, save for content already lawfully published and paid for.\n- Credits already consumed to reveal Creator information are not refunded."
+ },
+ {
+  "slug": "content-ip-policy",
+  "number": 8,
+  "title": "Content & Intellectual Property Policy",
+  "version": "2.0",
+  "effectiveFrom": "2026-08-01T00:00:00.000Z",
+  "requiredFor": [
+   "creator",
+   "brand"
+  ],
+  "signupPrimary": false,
+  "route": null,
+  "intro": [
+   {
+    "type": "p",
+    "text": "This Policy explains who owns content created through the Platform, what rights a Brand receives, and how intellectual property complaints are handled."
+   }
+  ],
+  "sections": [
+   {
+    "number": "8.1",
+    "heading": "Ownership of Creator content",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "A Creator retains ownership of the copyright in content they create, unless the parties expressly agree a full assignment in writing for a particular Collaboration. What a Brand receives by default is a licence, not ownership."
+     }
+    ]
+   },
+   {
+    "number": "8.2",
+    "heading": "Default licence to the Brand",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Unless otherwise agreed at the point of acceptance, on full payment the Creator grants the Brand a non-exclusive, worldwide licence to:"
+     },
+     {
+      "type": "ul",
+      "items": [
+       "Re-share and repost the content on the Brand's own organic social media channels.",
+       "Use the content on the Brand's website and in owned marketing materials.",
+       "Retain the content for a period of 12 months from the date of publication."
+      ]
+     },
+     {
+      "type": "p",
+      "text": "This default licence does not include paid advertising use, whitelisting or amplification, use in television or outdoor media, or modification beyond cropping and format adaptation."
+     }
+    ]
+   },
+   {
+    "number": "8.3",
+    "heading": "Extended rights",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Paid media usage, whitelisting, exclusivity, perpetual rights or full assignment must be agreed expressly and are usually subject to an additional fee. Any such agreement should be recorded on the Platform before work begins."
+     }
+    ]
+   },
+   {
+    "number": "8.4",
+    "heading": "Brand assets",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "A Brand grants the Creator a limited licence to use its trade marks, logos and product materials solely for the purposes of the agreed Collaboration, and for the duration of that Collaboration. The Creator must follow the Brand's usage guidelines where provided."
+     }
+    ]
+   },
+   {
+    "number": "8.5",
+    "heading": "Creator warranties",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "The content is original and does not infringe the rights of any third party.",
+       "Any music, images, footage or fonts used are licensed for commercial use.",
+       "Any person appearing in the content has consented to that appearance and its commercial use.",
+       "The content complies with applicable law and with Policy 15."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "8.6",
+    "heading": "Platform licence",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "By publishing a profile or completing a Collaboration, you grant Marqueiver a limited, royalty-free licence to display your name, handle, profile image and, where you consent, examples of your work for the purposes of operating and promoting the Platform. This licence ends when you remove the content or close your account, save for archival records."
+     }
+    ]
+   },
+   {
+    "number": "8.7",
+    "heading": "Copyright complaints",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "If you believe content on the Platform infringes your rights, write to hello@marqueiver.com identifying the content, the right infringed and your basis for the claim. We will acknowledge within 24 hours and act within 36 hours where the complaint is substantiated, in accordance with the Information Technology (Intermediary Guidelines) Rules 2021. We may remove content and, in the case of repeated infringement, terminate the account."
+     }
+    ]
+   },
+   {
+    "number": "8.8",
+    "heading": "AI-generated outputs",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Profile analysis, media-kits, rate suggestions and similar outputs generated by the Platform are provided for use on and in connection with the Platform. Creators may use their own media-kit freely, including off-platform. Marqueiver retains rights in the underlying models, prompts and software."
+     }
+    ]
+   }
+  ],
+  "body": "This Policy explains who owns content created through the Platform, what rights a Brand receives, and how intellectual property complaints are handled.\n\n## 8.1 Ownership of Creator content\n\nA Creator retains ownership of the copyright in content they create, unless the parties expressly agree a full assignment in writing for a particular Collaboration. What a Brand receives by default is a licence, not ownership.\n\n## 8.2 Default licence to the Brand\n\nUnless otherwise agreed at the point of acceptance, on full payment the Creator grants the Brand a non-exclusive, worldwide licence to:\n\n- Re-share and repost the content on the Brand's own organic social media channels.\n- Use the content on the Brand's website and in owned marketing materials.\n- Retain the content for a period of 12 months from the date of publication.\n\nThis default licence does not include paid advertising use, whitelisting or amplification, use in television or outdoor media, or modification beyond cropping and format adaptation.\n\n## 8.3 Extended rights\n\nPaid media usage, whitelisting, exclusivity, perpetual rights or full assignment must be agreed expressly and are usually subject to an additional fee. Any such agreement should be recorded on the Platform before work begins.\n\n## 8.4 Brand assets\n\nA Brand grants the Creator a limited licence to use its trade marks, logos and product materials solely for the purposes of the agreed Collaboration, and for the duration of that Collaboration. The Creator must follow the Brand's usage guidelines where provided.\n\n## 8.5 Creator warranties\n\n- The content is original and does not infringe the rights of any third party.\n- Any music, images, footage or fonts used are licensed for commercial use.\n- Any person appearing in the content has consented to that appearance and its commercial use.\n- The content complies with applicable law and with Policy 15.\n\n## 8.6 Platform licence\n\nBy publishing a profile or completing a Collaboration, you grant Marqueiver a limited, royalty-free licence to display your name, handle, profile image and, where you consent, examples of your work for the purposes of operating and promoting the Platform. This licence ends when you remove the content or close your account, save for archival records.\n\n## 8.7 Copyright complaints\n\nIf you believe content on the Platform infringes your rights, write to hello@marqueiver.com identifying the content, the right infringed and your basis for the claim. We will acknowledge within 24 hours and act within 36 hours where the complaint is substantiated, in accordance with the Information Technology (Intermediary Guidelines) Rules 2021. We may remove content and, in the case of repeated infringement, terminate the account.\n\n## 8.8 AI-generated outputs\n\nProfile analysis, media-kits, rate suggestions and similar outputs generated by the Platform are provided for use on and in connection with the Platform. Creators may use their own media-kit freely, including off-platform. Marqueiver retains rights in the underlying models, prompts and software."
+ },
+ {
+  "slug": "community-guidelines",
+  "number": 9,
+  "title": "Community Guidelines & Code of Conduct",
+  "version": "2.0",
+  "effectiveFrom": "2026-08-01T00:00:00.000Z",
+  "requiredFor": [
+   "creator",
+   "brand"
+  ],
+  "signupPrimary": false,
+  "route": null,
+  "intro": [
+   {
+    "type": "p",
+    "text": "Marqueiver exists to make collaboration between Creators and Brands straightforward and trustworthy. These Guidelines apply to every interaction on the Platform."
+   }
+  ],
+  "sections": [
+   {
+    "number": "9.1",
+    "heading": "Our expectations",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Be honest. Represent yourself, your business and your numbers accurately.",
+       "Be professional. Communicate clearly and respectfully, and respond in reasonable time.",
+       "Be reliable. Do what you agreed to do, by the date you agreed to do it.",
+       "Be fair. Pay for work performed; deliver work paid for."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "9.2",
+    "heading": "Harassment and discrimination",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "We do not tolerate harassment, abuse, threats, stalking, sexual advances, or discrimination on the basis of religion, caste, gender, sexual orientation, disability, region or language. This applies to in-platform chat, submitted content and any conduct connected to a Collaboration."
+     }
+    ]
+   },
+   {
+    "number": "9.3",
+    "heading": "Honest metrics",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Purchasing followers, likes, views or comments, using engagement pods or automation to inflate figures, or presenting another person's metrics as your own is prohibited. See Policy 11."
+     }
+    ]
+   },
+   {
+    "number": "9.4",
+    "heading": "Fraud and misrepresentation",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Do not impersonate another person, brand or account.",
+       "Do not create multiple accounts to evade limits, restrictions or suspension.",
+       "Do not submit content produced by another person as your own.",
+       "Do not manipulate reviews, or offer or demand incentives in exchange for reviews."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "9.5",
+    "heading": "Off-platform circumvention",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Attempting to move a Collaboration off the Platform to avoid fees harms Creators, Brands and the Platform equally: it removes escrow protection, the dispute process and the transaction record. It is treated as a serious breach."
+     }
+    ]
+   },
+   {
+    "number": "9.6",
+    "heading": "Content standards",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Do not post, submit or request content that is unlawful, obscene, defamatory, hateful, that promotes violence or self-harm, that infringes intellectual property, or that is otherwise prohibited under Policy 11."
+     }
+    ]
+   },
+   {
+    "number": "9.7",
+    "heading": "Reporting",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Report conduct that breaches these Guidelines to hello@marqueiver.com or through the in-platform report function. Reports are treated confidentially. Retaliation against a person who has made a good-faith report is itself a breach."
+     }
+    ]
+   },
+   {
+    "number": "9.8",
+    "heading": "Enforcement",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Depending on severity we may issue a warning, remove content, restrict features, withhold payment pending investigation, suspend or terminate an account, and where appropriate report the matter to the authorities. See Policy 12."
+     }
+    ]
+   }
+  ],
+  "body": "Marqueiver exists to make collaboration between Creators and Brands straightforward and trustworthy. These Guidelines apply to every interaction on the Platform.\n\n## 9.1 Our expectations\n\n- Be honest. Represent yourself, your business and your numbers accurately.\n- Be professional. Communicate clearly and respectfully, and respond in reasonable time.\n- Be reliable. Do what you agreed to do, by the date you agreed to do it.\n- Be fair. Pay for work performed; deliver work paid for.\n\n## 9.2 Harassment and discrimination\n\nWe do not tolerate harassment, abuse, threats, stalking, sexual advances, or discrimination on the basis of religion, caste, gender, sexual orientation, disability, region or language. This applies to in-platform chat, submitted content and any conduct connected to a Collaboration.\n\n## 9.3 Honest metrics\n\nPurchasing followers, likes, views or comments, using engagement pods or automation to inflate figures, or presenting another person's metrics as your own is prohibited. See Policy 11.\n\n## 9.4 Fraud and misrepresentation\n\n- Do not impersonate another person, brand or account.\n- Do not create multiple accounts to evade limits, restrictions or suspension.\n- Do not submit content produced by another person as your own.\n- Do not manipulate reviews, or offer or demand incentives in exchange for reviews.\n\n## 9.5 Off-platform circumvention\n\nAttempting to move a Collaboration off the Platform to avoid fees harms Creators, Brands and the Platform equally: it removes escrow protection, the dispute process and the transaction record. It is treated as a serious breach.\n\n## 9.6 Content standards\n\nDo not post, submit or request content that is unlawful, obscene, defamatory, hateful, that promotes violence or self-harm, that infringes intellectual property, or that is otherwise prohibited under Policy 11.\n\n## 9.7 Reporting\n\nReport conduct that breaches these Guidelines to hello@marqueiver.com or through the in-platform report function. Reports are treated confidentially. Retaliation against a person who has made a good-faith report is itself a breach.\n\n## 9.8 Enforcement\n\nDepending on severity we may issue a warning, remove content, restrict features, withhold payment pending investigation, suspend or terminate an account, and where appropriate report the matter to the authorities. See Policy 12."
+ },
+ {
+  "slug": "dispute-resolution-policy",
+  "number": 10,
+  "title": "Dispute Resolution Policy",
+  "version": "2.0",
+  "effectiveFrom": "2026-08-01T00:00:00.000Z",
+  "requiredFor": [
+   "creator",
+   "brand"
+  ],
+  "signupPrimary": false,
+  "route": null,
+  "intro": [
+   {
+    "type": "p",
+    "text": "This Policy sets out how disputes between a Brand and a Creator are resolved, and how disputes with Marqueiver are handled."
+   }
+  ],
+  "sections": [
+   {
+    "number": "10.1",
+    "heading": "Step one — direct resolution",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Parties should first attempt to resolve the matter directly through in-platform chat. Most disputes arise from unclear scope and are resolved by discussion. Keep the conversation on the Platform so that a record exists."
+     }
+    ]
+   },
+   {
+    "number": "10.2",
+    "heading": "Step two — raise a dispute",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "If direct discussion fails, either party may raise a dispute through the Platform within 14 days of the relevant event. The dispute must state what was agreed, what is said to have gone wrong, and the outcome sought. Escrowed funds relating to that Collaboration are held pending resolution."
+     }
+    ]
+   },
+   {
+    "number": "10.3",
+    "heading": "Step three — review by Marqueiver",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "We acknowledge a dispute within 2 working days.",
+       "Both parties are asked to provide evidence within 5 working days: the agreed brief, in-platform messages, submitted deliverables and published links.",
+       "We aim to determine the dispute within 10 working days of receiving complete evidence.",
+       "Our determination is based on the recorded scope, the evidence, and these policies."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "10.4",
+    "heading": "Possible outcomes",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Release of the full amount to the Creator.",
+       "Full refund to the Brand.",
+       "Partial release and partial refund reflecting work actually performed.",
+       "A direction to complete outstanding work within a specified period."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "10.5",
+    "heading": "Basis of our role",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Marqueiver's determination is made as administrator of the escrow arrangement, and the parties agree to be bound by it in respect of the escrowed funds. It does not constitute arbitration, legal advice or a judicial determination, and does not prevent a party from pursuing its legal rights."
+     }
+    ]
+   },
+   {
+    "number": "10.6",
+    "heading": "Disputes with Marqueiver",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "A dispute between a user and Marqueiver should first be raised with the Grievance Officer at harsh@marqueiver.com. Where it is not resolved within 30 days, it shall be referred to arbitration by a sole arbitrator under the Arbitration and Conciliation Act 1996. The seat and venue shall be New Delhi and the language shall be English."
+     }
+    ]
+   },
+   {
+    "number": "10.7",
+    "heading": "Consumer rights",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Nothing in this Policy limits any right a user may have under the Consumer Protection Act 2019 or other applicable law."
+     }
+    ]
+   }
+  ],
+  "body": "This Policy sets out how disputes between a Brand and a Creator are resolved, and how disputes with Marqueiver are handled.\n\n## 10.1 Step one — direct resolution\n\nParties should first attempt to resolve the matter directly through in-platform chat. Most disputes arise from unclear scope and are resolved by discussion. Keep the conversation on the Platform so that a record exists.\n\n## 10.2 Step two — raise a dispute\n\nIf direct discussion fails, either party may raise a dispute through the Platform within 14 days of the relevant event. The dispute must state what was agreed, what is said to have gone wrong, and the outcome sought. Escrowed funds relating to that Collaboration are held pending resolution.\n\n## 10.3 Step three — review by Marqueiver\n\n- We acknowledge a dispute within 2 working days.\n- Both parties are asked to provide evidence within 5 working days: the agreed brief, in-platform messages, submitted deliverables and published links.\n- We aim to determine the dispute within 10 working days of receiving complete evidence.\n- Our determination is based on the recorded scope, the evidence, and these policies.\n\n## 10.4 Possible outcomes\n\n- Release of the full amount to the Creator.\n- Full refund to the Brand.\n- Partial release and partial refund reflecting work actually performed.\n- A direction to complete outstanding work within a specified period.\n\n## 10.5 Basis of our role\n\nMarqueiver's determination is made as administrator of the escrow arrangement, and the parties agree to be bound by it in respect of the escrowed funds. It does not constitute arbitration, legal advice or a judicial determination, and does not prevent a party from pursuing its legal rights.\n\n## 10.6 Disputes with Marqueiver\n\nA dispute between a user and Marqueiver should first be raised with the Grievance Officer at harsh@marqueiver.com. Where it is not resolved within 30 days, it shall be referred to arbitration by a sole arbitrator under the Arbitration and Conciliation Act 1996. The seat and venue shall be New Delhi and the language shall be English.\n\n## 10.7 Consumer rights\n\nNothing in this Policy limits any right a user may have under the Consumer Protection Act 2019 or other applicable law."
+ },
+ {
+  "slug": "prohibited-activities-policy",
+  "number": 11,
+  "title": "Prohibited Activities Policy",
+  "version": "2.0",
+  "effectiveFrom": "2026-08-01T00:00:00.000Z",
+  "requiredFor": [
+   "creator",
+   "brand"
+  ],
+  "signupPrimary": false,
+  "route": null,
+  "intro": [
+   {
+    "type": "p",
+    "text": "The following activities are prohibited on the Marqueiver platform. This list is not exhaustive. Breach may result in immediate suspension or termination and, where appropriate, referral to the authorities."
+   }
+  ],
+  "sections": [
+   {
+    "number": "11.1",
+    "heading": "Fake engagement and metric manipulation",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Buying followers, likes, views, comments or subscribers.",
+       "Using bots, automation, engagement pods or reciprocal engagement schemes.",
+       "Presenting another account's metrics, audience or content as your own.",
+       "Editing or fabricating analytics screenshots or performance reports."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "11.2",
+    "heading": "Misleading advertising",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Making false or unsubstantiated claims about a product or service.",
+       "Claiming health, medical, financial or income results that cannot be substantiated.",
+       "Concealing the commercial nature of a paid partnership (see Policy 15).",
+       "Using fabricated testimonials, before-and-after imagery or fake reviews."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "11.3",
+    "heading": "Prohibited products and services",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Illegal drugs, tobacco and vaping products, and any product whose promotion is restricted by law.",
+       "Alcohol, where promotion is prohibited under applicable state law or through surrogate advertising.",
+       "Betting, gambling and real-money gaming, where prohibited by applicable law.",
+       "Weapons, ammunition and explosives.",
+       "Counterfeit goods and goods infringing intellectual property.",
+       "Prescription medicines, unapproved medical devices and unproven treatments.",
+       "Unregistered financial schemes, cryptocurrency promotions that breach applicable regulation, pyramid and chain schemes.",
+       "Adult content and services."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "11.4",
+    "heading": "Fraud and financial misconduct",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Payment fraud, chargeback abuse and money laundering.",
+       "Requesting or making payment outside the Platform for a Collaboration arranged on it.",
+       "Creating fictitious Collaborations to move funds or generate false transaction history.",
+       "Providing payout details belonging to another person."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "11.5",
+    "heading": "Platform abuse",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Scraping, harvesting or bulk-exporting Creator or Brand data.",
+       "Reverse engineering, probing or interfering with the Platform's security.",
+       "Creating multiple or fake accounts, or evading a suspension.",
+       "Exploiting a defect in Credits, escrow, referral or reward mechanisms."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "11.6",
+    "heading": "Harmful and unlawful content",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Content that is obscene, hateful, defamatory, or that incites violence.",
+       "Content that endangers the sovereignty, integrity or security of India, or public order.",
+       "Content involving minors in an unsafe or exploitative manner.",
+       "Content infringing copyright, trade marks or personality rights."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "11.7",
+    "heading": "Reporting and consequences",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Suspected breaches may be reported to hello@marqueiver.com. Depending on severity, consequences include content removal, forfeiture of Credits obtained through abuse, withholding of payment, permanent termination, recovery of fees avoided, and referral to law enforcement."
+     }
+    ]
+   }
+  ],
+  "body": "The following activities are prohibited on the Marqueiver platform. This list is not exhaustive. Breach may result in immediate suspension or termination and, where appropriate, referral to the authorities.\n\n## 11.1 Fake engagement and metric manipulation\n\n- Buying followers, likes, views, comments or subscribers.\n- Using bots, automation, engagement pods or reciprocal engagement schemes.\n- Presenting another account's metrics, audience or content as your own.\n- Editing or fabricating analytics screenshots or performance reports.\n\n## 11.2 Misleading advertising\n\n- Making false or unsubstantiated claims about a product or service.\n- Claiming health, medical, financial or income results that cannot be substantiated.\n- Concealing the commercial nature of a paid partnership (see Policy 15).\n- Using fabricated testimonials, before-and-after imagery or fake reviews.\n\n## 11.3 Prohibited products and services\n\n- Illegal drugs, tobacco and vaping products, and any product whose promotion is restricted by law.\n- Alcohol, where promotion is prohibited under applicable state law or through surrogate advertising.\n- Betting, gambling and real-money gaming, where prohibited by applicable law.\n- Weapons, ammunition and explosives.\n- Counterfeit goods and goods infringing intellectual property.\n- Prescription medicines, unapproved medical devices and unproven treatments.\n- Unregistered financial schemes, cryptocurrency promotions that breach applicable regulation, pyramid and chain schemes.\n- Adult content and services.\n\n## 11.4 Fraud and financial misconduct\n\n- Payment fraud, chargeback abuse and money laundering.\n- Requesting or making payment outside the Platform for a Collaboration arranged on it.\n- Creating fictitious Collaborations to move funds or generate false transaction history.\n- Providing payout details belonging to another person.\n\n## 11.5 Platform abuse\n\n- Scraping, harvesting or bulk-exporting Creator or Brand data.\n- Reverse engineering, probing or interfering with the Platform's security.\n- Creating multiple or fake accounts, or evading a suspension.\n- Exploiting a defect in Credits, escrow, referral or reward mechanisms.\n\n## 11.6 Harmful and unlawful content\n\n- Content that is obscene, hateful, defamatory, or that incites violence.\n- Content that endangers the sovereignty, integrity or security of India, or public order.\n- Content involving minors in an unsafe or exploitative manner.\n- Content infringing copyright, trade marks or personality rights.\n\n## 11.7 Reporting and consequences\n\nSuspected breaches may be reported to hello@marqueiver.com. Depending on severity, consequences include content removal, forfeiture of Credits obtained through abuse, withholding of payment, permanent termination, recovery of fees avoided, and referral to law enforcement."
+ },
+ {
+  "slug": "account-suspension-policy",
+  "number": 12,
+  "title": "Account Suspension & Termination Policy",
+  "version": "2.0",
+  "effectiveFrom": "2026-08-01T00:00:00.000Z",
+  "requiredFor": [
+   "creator",
+   "brand"
+  ],
+  "signupPrimary": false,
+  "route": null,
+  "intro": [
+   {
+    "type": "p",
+    "text": "This Policy explains when an account may be restricted, suspended or terminated, and what happens to money and data in each case."
+   }
+  ],
+  "sections": [
+   {
+    "number": "12.1",
+    "heading": "Graduated action",
+    "blocks": [
+     {
+      "type": "table",
+      "head": [
+       "Level",
+       "Trigger",
+       "Effect"
+      ],
+      "rows": [
+       [
+        "Warning",
+        "First minor breach; incomplete or inaccurate information.",
+        "Notice and a period to correct."
+       ],
+       [
+        "Restriction",
+        "Repeated minor breach; unresolved verification.",
+        "Specific features limited, such as sending briefs or revealing profiles."
+       ],
+       [
+        "Suspension",
+        "Serious breach; credible allegation under investigation.",
+        "Access paused; funds and payouts held pending outcome."
+       ],
+       [
+        "Termination",
+        "Severe or repeated breach; fraud; unlawful conduct.",
+        "Account closed permanently; re-registration prohibited."
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "number": "12.2",
+    "heading": "Grounds for immediate suspension or termination",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Fraud, payment fraud or money laundering.",
+       "Fake engagement or systematic misrepresentation of metrics.",
+       "Harassment, threats or abusive conduct.",
+       "Promotion of prohibited products or unlawful content.",
+       "Repeated circumvention of the Platform for payment or communication.",
+       "Creating accounts to evade an existing restriction.",
+       "Any conduct exposing Marqueiver or its users to legal liability."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "12.3",
+    "heading": "Effect on money",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Collaborations in progress may be paused; escrowed funds are held pending review.",
+       "Amounts properly earned for work actually delivered will be paid, subject to investigation and any lawful deduction.",
+       "Unused Credits may be refunded at our discretion, save where the account is terminated for fraud or abuse, in which case they may be forfeited.",
+       "We may set off amounts owed to us, including fees avoided by off-platform dealing."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "12.4",
+    "heading": "Voluntary closure",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "You may close your account at any time from your account settings or by writing to hello@marqueiver.com, provided no Collaboration is in progress and no dispute is outstanding. Closure does not extinguish accrued obligations."
+     }
+    ]
+   },
+   {
+    "number": "12.5",
+    "heading": "Data after closure",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Profile information is removed from public discovery promptly. Transaction, tax and dispute records are retained as required by law, typically eight years. Deletion requests are handled under Policy 2.8."
+     }
+    ]
+   },
+   {
+    "number": "12.6",
+    "heading": "Appeals",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "You may appeal a restriction, suspension or termination by writing to hello@marqueiver.com within 30 days, setting out why the decision should be reconsidered. Appeals are reviewed by someone not involved in the original decision, and a reasoned response is provided within 15 working days."
+     }
+    ]
+   }
+  ],
+  "body": "This Policy explains when an account may be restricted, suspended or terminated, and what happens to money and data in each case.\n\n## 12.1 Graduated action\n\nLevel | Trigger | Effect\n--- | --- | ---\nWarning | First minor breach; incomplete or inaccurate information. | Notice and a period to correct.\nRestriction | Repeated minor breach; unresolved verification. | Specific features limited, such as sending briefs or revealing profiles.\nSuspension | Serious breach; credible allegation under investigation. | Access paused; funds and payouts held pending outcome.\nTermination | Severe or repeated breach; fraud; unlawful conduct. | Account closed permanently; re-registration prohibited.\n\n## 12.2 Grounds for immediate suspension or termination\n\n- Fraud, payment fraud or money laundering.\n- Fake engagement or systematic misrepresentation of metrics.\n- Harassment, threats or abusive conduct.\n- Promotion of prohibited products or unlawful content.\n- Repeated circumvention of the Platform for payment or communication.\n- Creating accounts to evade an existing restriction.\n- Any conduct exposing Marqueiver or its users to legal liability.\n\n## 12.3 Effect on money\n\n- Collaborations in progress may be paused; escrowed funds are held pending review.\n- Amounts properly earned for work actually delivered will be paid, subject to investigation and any lawful deduction.\n- Unused Credits may be refunded at our discretion, save where the account is terminated for fraud or abuse, in which case they may be forfeited.\n- We may set off amounts owed to us, including fees avoided by off-platform dealing.\n\n## 12.4 Voluntary closure\n\nYou may close your account at any time from your account settings or by writing to hello@marqueiver.com, provided no Collaboration is in progress and no dispute is outstanding. Closure does not extinguish accrued obligations.\n\n## 12.5 Data after closure\n\nProfile information is removed from public discovery promptly. Transaction, tax and dispute records are retained as required by law, typically eight years. Deletion requests are handled under Policy 2.8.\n\n## 12.6 Appeals\n\nYou may appeal a restriction, suspension or termination by writing to hello@marqueiver.com within 30 days, setting out why the decision should be reconsidered. Appeals are reviewed by someone not involved in the original decision, and a reasoned response is provided within 15 working days."
+ },
+ {
+  "slug": "kyc-verification-policy",
+  "number": 13,
+  "title": "KYC & Verification Policy",
+  "version": "2.0",
+  "effectiveFrom": "2026-08-01T00:00:00.000Z",
+  "requiredFor": [
+   "creator",
+   "brand"
+  ],
+  "signupPrimary": false,
+  "route": null,
+  "intro": [
+   {
+    "type": "p",
+    "text": "Verification protects both sides of the marketplace: Brands need confidence that Creators are genuine, and Creators need confidence that Brands will pay. This Policy explains what we verify and when."
+   }
+  ],
+  "sections": [
+   {
+    "number": "13.1",
+    "heading": "Levels of verification",
+    "blocks": [
+     {
+      "type": "table",
+      "head": [
+       "Level",
+       "Applies to",
+       "Requirement"
+      ],
+      "rows": [
+       [
+        "Basic",
+        "All users at registration",
+        "Verified mobile number and email address."
+       ],
+       [
+        "Creator payout",
+        "Creators receiving payment",
+        "PAN, and UPI ID or bank account in the Creator's own name."
+       ],
+       [
+        "Social verification",
+        "Creators",
+        "Connection and authorisation of the social account, confirming ownership and enabling verified metrics."
+       ],
+       [
+        "Brand verification",
+        "Brands",
+        "Company name, work email on a business domain, website, and GSTIN where applicable."
+       ],
+       [
+        "Enhanced",
+        "High-value or flagged accounts",
+        "Government identity document, company incorporation documents, address proof."
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "number": "13.2",
+    "heading": "Verified metrics",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Where a Creator connects a social account, metrics retrieved directly from that platform are marked as verified. Where a Creator has not connected an account, figures are self-reported and are labelled as such so that Brands can judge them accordingly. We do not represent self-reported figures as verified."
+     }
+    ]
+   },
+   {
+    "number": "13.3",
+    "heading": "Verified badge",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "A verified badge indicates that account ownership and identity checks have been completed. It is not an endorsement of quality, and does not guarantee performance or conduct."
+     }
+    ]
+   },
+   {
+    "number": "13.4",
+    "heading": "Ongoing verification",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "We may re-verify at any time, and will do so where there are indications of fake engagement, sudden unexplained changes in metrics, disputed payouts, or a report from another user. Features may be restricted while verification is outstanding."
+     }
+    ]
+   },
+   {
+    "number": "13.5",
+    "heading": "Handling of verification data",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Identity and financial documents are used only for verification, payment and legal compliance.",
+       "They are never displayed to other users.",
+       "They are stored securely and retained in accordance with Policy 2.6."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "13.6",
+    "heading": "Consequences of failed or false verification",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Where verification cannot be completed, features may remain restricted. Where documents are found to be false or belonging to another person, the account will be terminated and, where appropriate, the matter reported to the authorities."
+     }
+    ]
+   }
+  ],
+  "body": "Verification protects both sides of the marketplace: Brands need confidence that Creators are genuine, and Creators need confidence that Brands will pay. This Policy explains what we verify and when.\n\n## 13.1 Levels of verification\n\nLevel | Applies to | Requirement\n--- | --- | ---\nBasic | All users at registration | Verified mobile number and email address.\nCreator payout | Creators receiving payment | PAN, and UPI ID or bank account in the Creator's own name.\nSocial verification | Creators | Connection and authorisation of the social account, confirming ownership and enabling verified metrics.\nBrand verification | Brands | Company name, work email on a business domain, website, and GSTIN where applicable.\nEnhanced | High-value or flagged accounts | Government identity document, company incorporation documents, address proof.\n\n## 13.2 Verified metrics\n\nWhere a Creator connects a social account, metrics retrieved directly from that platform are marked as verified. Where a Creator has not connected an account, figures are self-reported and are labelled as such so that Brands can judge them accordingly. We do not represent self-reported figures as verified.\n\n## 13.3 Verified badge\n\nA verified badge indicates that account ownership and identity checks have been completed. It is not an endorsement of quality, and does not guarantee performance or conduct.\n\n## 13.4 Ongoing verification\n\nWe may re-verify at any time, and will do so where there are indications of fake engagement, sudden unexplained changes in metrics, disputed payouts, or a report from another user. Features may be restricted while verification is outstanding.\n\n## 13.5 Handling of verification data\n\n- Identity and financial documents are used only for verification, payment and legal compliance.\n- They are never displayed to other users.\n- They are stored securely and retained in accordance with Policy 2.6.\n\n## 13.6 Consequences of failed or false verification\n\nWhere verification cannot be completed, features may remain restricted. Where documents are found to be false or belonging to another person, the account will be terminated and, where appropriate, the matter reported to the authorities."
+ },
+ {
+  "slug": "commission-fees-policy",
+  "number": 14,
+  "title": "Commission & Platform Fee Policy",
+  "version": "2.0",
+  "effectiveFrom": "2026-08-01T00:00:00.000Z",
+  "requiredFor": [
+   "creator",
+   "brand"
+  ],
+  "signupPrimary": false,
+  "route": null,
+  "intro": [
+   {
+    "type": "p",
+    "text": "This Policy explains what Marqueiver charges, when it is charged, and what it pays for. Our aim is that there are no surprises on either side."
+   }
+  ],
+  "sections": [
+   {
+    "number": "14.1",
+    "heading": "Platform commission — 12.5%",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Marqueiver charges a platform commission of 12.5% of the agreed Collaboration value. The commission is deducted at the point funds are released to the Creator. The Creator therefore receives the agreed amount less the 12.5% commission and any statutory deductions such as tax deducted at source."
+     }
+    ]
+   },
+   {
+    "number": "14.2",
+    "heading": "Worked example",
+    "blocks": [
+     {
+      "type": "table",
+      "head": [
+       "Item",
+       "Amount"
+      ],
+      "rows": [
+       [
+        "Agreed Collaboration value",
+        "₹10,000"
+       ],
+       [
+        "Funded into escrow by the Brand",
+        "₹10,000"
+       ],
+       [
+        "Marqueiver commission at 12.5%",
+        "₹1,250"
+       ],
+       [
+        "Statutory deductions (illustrative, if applicable)",
+        "As required by law"
+       ],
+       [
+        "Net amount payable to the Creator",
+        "₹8,750 less any statutory deduction"
+       ]
+      ]
+     },
+     {
+      "type": "p",
+      "text": "Figures are illustrative. No GST is added at present, as Marqueiver is not yet registered. Any TDS applies only where required by law — see Policy 6.8, under which most Creators will see no deduction."
+     }
+    ]
+   },
+   {
+    "number": "14.3",
+    "heading": "What the commission covers",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Discovery, matching and profile analysis.",
+       "Escrow handling and payment processing.",
+       "In-platform communication and the transaction record.",
+       "Dispute resolution and support.",
+       "Fraud prevention and verification."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "14.4",
+    "heading": "What Creators pay",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Creators pay nothing to join, to build a profile, to be discovered or to receive briefs. The only deduction from a Creator is the commission on a completed Collaboration. Optional paid visibility tiers are separate, entirely voluntary, and are described in Policy 3.9."
+     }
+    ]
+   },
+   {
+    "number": "14.5",
+    "heading": "What Brands pay",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Credits, purchased in advance, to access Creator information (Policy 6.1).",
+       "The Collaboration value, funded into escrow before work begins."
+      ]
+     },
+     {
+      "type": "p",
+      "text": "The 12.5% commission is deducted from the Collaboration value and is not charged additionally to the Brand, unless expressly agreed otherwise."
+     }
+    ]
+   },
+   {
+    "number": "14.6",
+    "heading": "Taxes on fees",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Marqueiver is not presently registered under GST, and no GST is charged on the platform commission. A payment receipt is issued for each commission charged."
+     },
+     {
+      "type": "p",
+      "text": "Amounts are quoted exclusive of taxes. Marqueiver will register under GST when required to do so, expected as paid transactions commence. From that date GST will be added at the prevailing statutory rate, tax invoices will replace payment receipts, and at least 15 days' notice will be given. Credits already purchased and Collaborations already accepted will not be taxed retrospectively. Full detail is at Policy 6.7."
+     },
+     {
+      "type": "p",
+      "text": "Deductions from Creator payouts are made only where required under the Income-tax Act 1961. See Policy 6.8."
+     }
+    ]
+   },
+   {
+    "number": "14.7",
+    "heading": "Changes to fees",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "We may change commission rates or Credit pricing on at least 30 days' notice given by email and in-platform notice. Changes do not affect Collaborations already accepted, or Credits already purchased."
+     }
+    ]
+   },
+   {
+    "number": "14.8",
+    "heading": "Promotional rates",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "We may from time to time offer reduced or zero commission for particular campaigns, cohorts or periods. Where we do, the applicable rate is that shown at the point of acceptance of the Collaboration."
+     }
+    ]
+   }
+  ],
+  "body": "This Policy explains what Marqueiver charges, when it is charged, and what it pays for. Our aim is that there are no surprises on either side.\n\n## 14.1 Platform commission — 12.5%\n\nMarqueiver charges a platform commission of 12.5% of the agreed Collaboration value. The commission is deducted at the point funds are released to the Creator. The Creator therefore receives the agreed amount less the 12.5% commission and any statutory deductions such as tax deducted at source.\n\n## 14.2 Worked example\n\nItem | Amount\n--- | ---\nAgreed Collaboration value | ₹10,000\nFunded into escrow by the Brand | ₹10,000\nMarqueiver commission at 12.5% | ₹1,250\nStatutory deductions (illustrative, if applicable) | As required by law\nNet amount payable to the Creator | ₹8,750 less any statutory deduction\n\nFigures are illustrative. No GST is added at present, as Marqueiver is not yet registered. Any TDS applies only where required by law — see Policy 6.8, under which most Creators will see no deduction.\n\n## 14.3 What the commission covers\n\n- Discovery, matching and profile analysis.\n- Escrow handling and payment processing.\n- In-platform communication and the transaction record.\n- Dispute resolution and support.\n- Fraud prevention and verification.\n\n## 14.4 What Creators pay\n\nCreators pay nothing to join, to build a profile, to be discovered or to receive briefs. The only deduction from a Creator is the commission on a completed Collaboration. Optional paid visibility tiers are separate, entirely voluntary, and are described in Policy 3.9.\n\n## 14.5 What Brands pay\n\n- Credits, purchased in advance, to access Creator information (Policy 6.1).\n- The Collaboration value, funded into escrow before work begins.\n\nThe 12.5% commission is deducted from the Collaboration value and is not charged additionally to the Brand, unless expressly agreed otherwise.\n\n## 14.6 Taxes on fees\n\nMarqueiver is not presently registered under GST, and no GST is charged on the platform commission. A payment receipt is issued for each commission charged.\n\nAmounts are quoted exclusive of taxes. Marqueiver will register under GST when required to do so, expected as paid transactions commence. From that date GST will be added at the prevailing statutory rate, tax invoices will replace payment receipts, and at least 15 days' notice will be given. Credits already purchased and Collaborations already accepted will not be taxed retrospectively. Full detail is at Policy 6.7.\n\nDeductions from Creator payouts are made only where required under the Income-tax Act 1961. See Policy 6.8.\n\n## 14.7 Changes to fees\n\nWe may change commission rates or Credit pricing on at least 30 days' notice given by email and in-platform notice. Changes do not affect Collaborations already accepted, or Credits already purchased.\n\n## 14.8 Promotional rates\n\nWe may from time to time offer reduced or zero commission for particular campaigns, cohorts or periods. Where we do, the applicable rate is that shown at the point of acceptance of the Collaboration."
+ },
+ {
+  "slug": "advertising-disclosure-policy",
+  "number": 15,
+  "title": "Advertising & Disclosure Policy",
+  "version": "2.0",
+  "effectiveFrom": "2026-08-01T00:00:00.000Z",
+  "requiredFor": [
+   "creator",
+   "brand"
+  ],
+  "signupPrimary": false,
+  "route": null,
+  "intro": [
+   {
+    "type": "p",
+    "text": "Every paid partnership arranged through Marqueiver must be disclosed clearly. This is a legal requirement in India under the ASCI Guidelines for Influencer Advertising in Digital Media and the Consumer Protection Act 2019, and it is a condition of using the Platform."
+   }
+  ],
+  "sections": [
+   {
+    "number": "15.1",
+    "heading": "When disclosure is required",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Disclosure is required wherever a Creator has received anything of value in exchange for content. This includes monetary payment, free products, gifting, discounts, travel, hospitality, affiliate commission or any other benefit — whether or not the Brand asked for a specific message."
+     }
+    ]
+   },
+   {
+    "number": "15.2",
+    "heading": "How to disclose",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Use a clear label such as #ad, #advertisement, #sponsored, #paidpartnership, #collab or #brandambassador, or the platform's own paid-partnership tool.",
+       "Place the disclosure prominently and upfront, so that it is visible without the viewer having to click More, expand a caption or scroll.",
+       "In video, the disclosure must be visible or audible for a sufficient period to be noticed, and not only in the description.",
+       "In audio or live content, state the disclosure verbally at the start.",
+       "Use the same language as the content itself, so that a Hindi or regional-language audience understands it."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "15.3",
+    "heading": "Labels that are not acceptable",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Vague or ambiguous terms such as #collab used alone without context, #sp, #thanks or #gifted where it is unclear a commercial arrangement exists.",
+       "Disclosure buried among a large block of unrelated hashtags.",
+       "Disclosure visible only after expanding the caption.",
+       "Disclosure in a language the audience is unlikely to understand."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "15.4",
+    "heading": "Substantiation of claims",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "Do not state or imply results that cannot be substantiated by the Brand.",
+       "Health, medical, nutritional, financial and income claims require particular care and must be supported by the Brand with evidence.",
+       "Do not present a personal opinion as clinical or expert advice unless suitably qualified.",
+       "Do not disparage a competitor without a factual basis."
+      ]
+     }
+    ]
+   },
+   {
+    "number": "15.5",
+    "heading": "Responsibilities",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Creators — are responsible for making the disclosure correctly on every piece of paid content, and for verifying claims they make about a product."
+     },
+     {
+      "type": "p",
+      "text": "Brands — must not ask a Creator to omit or obscure a disclosure, and must provide substantiation for any claim they require a Creator to make. A Brand that instructs a Creator to conceal a commercial relationship is in breach of this Policy."
+     },
+     {
+      "type": "p",
+      "text": "Marqueiver — provides guidance and may check published content for compliance, but is not responsible for a Creator's or Brand's failure to comply with law."
+     }
+    ]
+   },
+   {
+    "number": "15.6",
+    "heading": "Special categories",
+    "blocks": [
+     {
+      "type": "p",
+      "text": "Content relating to alcohol, tobacco, betting and gambling, real-money gaming, financial products, cryptocurrency, medicines, medical devices, infant nutrition and children's products is subject to additional legal restrictions, and in some cases outright prohibition. Refer to Policy 11.3 and take independent advice before proceeding."
+     }
+    ]
+   },
+   {
+    "number": "15.7",
+    "heading": "Consequences of non-disclosure",
+    "blocks": [
+     {
+      "type": "ul",
+      "items": [
+       "We may require the content to be corrected or removed.",
+       "Payment may be withheld until the disclosure is corrected.",
+       "Repeated failure may result in suspension or termination.",
+       "Regulatory penalties under the Consumer Protection Act 2019 fall on the Creator and the Brand, not on Marqueiver."
+      ]
+     }
+    ]
+   }
+  ],
+  "body": "Every paid partnership arranged through Marqueiver must be disclosed clearly. This is a legal requirement in India under the ASCI Guidelines for Influencer Advertising in Digital Media and the Consumer Protection Act 2019, and it is a condition of using the Platform.\n\n## 15.1 When disclosure is required\n\nDisclosure is required wherever a Creator has received anything of value in exchange for content. This includes monetary payment, free products, gifting, discounts, travel, hospitality, affiliate commission or any other benefit — whether or not the Brand asked for a specific message.\n\n## 15.2 How to disclose\n\n- Use a clear label such as #ad, #advertisement, #sponsored, #paidpartnership, #collab or #brandambassador, or the platform's own paid-partnership tool.\n- Place the disclosure prominently and upfront, so that it is visible without the viewer having to click More, expand a caption or scroll.\n- In video, the disclosure must be visible or audible for a sufficient period to be noticed, and not only in the description.\n- In audio or live content, state the disclosure verbally at the start.\n- Use the same language as the content itself, so that a Hindi or regional-language audience understands it.\n\n## 15.3 Labels that are not acceptable\n\n- Vague or ambiguous terms such as #collab used alone without context, #sp, #thanks or #gifted where it is unclear a commercial arrangement exists.\n- Disclosure buried among a large block of unrelated hashtags.\n- Disclosure visible only after expanding the caption.\n- Disclosure in a language the audience is unlikely to understand.\n\n## 15.4 Substantiation of claims\n\n- Do not state or imply results that cannot be substantiated by the Brand.\n- Health, medical, nutritional, financial and income claims require particular care and must be supported by the Brand with evidence.\n- Do not present a personal opinion as clinical or expert advice unless suitably qualified.\n- Do not disparage a competitor without a factual basis.\n\n## 15.5 Responsibilities\n\nCreators — are responsible for making the disclosure correctly on every piece of paid content, and for verifying claims they make about a product.\n\nBrands — must not ask a Creator to omit or obscure a disclosure, and must provide substantiation for any claim they require a Creator to make. A Brand that instructs a Creator to conceal a commercial relationship is in breach of this Policy.\n\nMarqueiver — provides guidance and may check published content for compliance, but is not responsible for a Creator's or Brand's failure to comply with law.\n\n## 15.6 Special categories\n\nContent relating to alcohol, tobacco, betting and gambling, real-money gaming, financial products, cryptocurrency, medicines, medical devices, infant nutrition and children's products is subject to additional legal restrictions, and in some cases outright prohibition. Refer to Policy 11.3 and take independent advice before proceeding.\n\n## 15.7 Consequences of non-disclosure\n\n- We may require the content to be corrected or removed.\n- Payment may be withheld until the disclosure is corrected.\n- Repeated failure may result in suspension or termination.\n- Regulatory penalties under the Consumer Protection Act 2019 fall on the Creator and the Brand, not on Marqueiver."
+ }
+]
