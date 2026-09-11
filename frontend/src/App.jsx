@@ -23,6 +23,7 @@ import CreatorsPage from './pages/CreatorsPage';
 import CreatorProfilePage from './pages/CreatorProfilePage';
 import BrandProfilePage from './pages/BrandProfilePage';
 import CampaignsPage from './pages/CampaignsPage';
+import CampaignCreatePage from './pages/CampaignCreatePage';
 import DealsPage from './pages/DealsPage';
 import DealDetailPage from './pages/DealDetailPage';
 import MessagesPage from './pages/MessagesPage';
@@ -186,6 +187,10 @@ export default function App() {
             <Route path="/brand/:id" element={<Ready><BrandProfilePage /></Ready>} />
             <Route path="/brand" element={<Ready><BrandProfilePage /></Ready>} />
             <Route path="/campaigns" element={<Ready><CampaignsPage /></Ready>} />
+            {/* The wizard writes a real draft campaign, so it is brand-only at
+                the route as well as in the controller. */}
+            <Route path="/campaigns/new" element={<RoleRoute allow={['brand']}><CampaignCreatePage /></RoleRoute>} />
+            <Route path="/campaigns/:id/edit" element={<RoleRoute allow={['brand']}><CampaignCreatePage /></RoleRoute>} />
             <Route path="/deals" element={<Ready><DealsPage /></Ready>} />
             <Route path="/deals/:id" element={<Ready><DealDetailPage /></Ready>} />
             <Route path="/messages" element={<Ready><MessagesPage /></Ready>} />
