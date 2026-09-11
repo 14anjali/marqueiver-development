@@ -472,6 +472,15 @@ export const api = {
   listCampaignsForBrand: (brandUserId) => req(`/api/campaigns?brand=${brandUserId}`),
   getCampaign: (id) => req(`/api/campaigns/${id}`),
   updateCampaign: (id, payload) => req(`/api/campaigns/${id}`, { method: 'PATCH', body: payload }),
+  /**
+   * What is still missing before a campaign can be published. The wizard's
+   * review step reads this rather than deciding for itself, so the checklist a
+   * brand sees is the one the publish gate actually enforces.
+   */
+  campaignReadiness: (id) => req(`/api/campaigns/${id}/readiness`),
+  /** Campaign and product imagery, through the existing upload-url endpoint. */
+  campaignUploadUrl: (fileName, contentType) =>
+    req('/api/users/me/logo-upload-url', { method: 'POST', body: { fileName, contentType, purpose: 'campaign' } }),
   applyToCampaign: (id) => req(`/api/campaigns/${id}/apply`, { method: 'POST' }),
   listCampaignApplicants: (id) => req(`/api/campaigns/${id}/applicants`),
   // §10 — campaigns this creator has applied to, with status from the server.

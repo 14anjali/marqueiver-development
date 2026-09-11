@@ -11,6 +11,9 @@ router.get('/', c.listCampaigns);
 // Must be declared before '/:id' or "applied" is captured as an id.
 router.get('/applied', c.listMyApplications);
 router.get('/:id', c.getCampaign);
+// What is still missing before this campaign can be published. Owner-only, and
+// declared before the PATCH so the wizard's review step has one source of truth.
+router.get('/:id/readiness', c.getPublishReadiness);
 router.patch('/:id', validate(c.updateCampaignSchema), c.updateCampaign);
 // Draft/rejected → back into the review queue. Distinct from PATCH so that
 // saving an edit does not re-enter the queue on every keystroke.

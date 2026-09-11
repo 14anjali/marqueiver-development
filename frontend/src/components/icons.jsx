@@ -62,6 +62,7 @@ export const Platform = ({ name, className = 'w-4 h-4' }) => {
 // Additive icons for new pages (Portfolio/Analytics/Earnings/Media Kit) and
 // the mobile nav — same minimal inline-SVG style as above.
 export const X = (p) => <S {...p}><path d="M18 6 6 18M6 6l12 12" /></S>;
+export const Plus = (p) => <S {...p}><path d="M12 5v14M5 12h14" /></S>;
 export const BarChart = (p) => <S {...p}><path d="M3 3v18h18" /><rect x="7" y="12" width="3" height="6" /><rect x="12" y="8" width="3" height="10" /><rect x="17" y="5" width="3" height="13" /></S>;
 export const Wallet = (p) => <S {...p}><rect x="2" y="6" width="20" height="14" rx="2" /><path d="M2 10h20" /><circle cx="17" cy="15" r="1" /></S>;
 export const Image = (p) => <S {...p}><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m21 15-5-5L5 21" /></S>;

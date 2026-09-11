@@ -36,93 +36,15 @@ const APPLICATION_LABEL = {
   rejected: 'Not selected',
 };
 
-function CreateCampaignModal({ onClose, onCreated }) {
-  const [form, setForm] = useState({ title: '', brief: '', budget: '', location: 'India', tags: '' });
-  const [busy, setBusy] = useState(false);
-  const toast = useToast();
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-
-  const budget = Number(form.budget);
-  const valid = form.title.trim().length >= 3 && budget > 0;
-
-  async function submit(e) {
-    e?.preventDefault();
-    if (!valid) return;
-    setBusy(true);
-    try {
-      const { data } = await api.createCampaign({
-        title: form.title.trim(),
-        brief: form.brief.trim(),
-        budget,
-        location: form.location,
-        tags: form.tags.split(',').map((t) => t.trim()).filter(Boolean),
-      });
-      toast.push('Sent for review', 'success');
-      onCreated(data);
-    } catch (err) { toast.push(err.message, 'error'); }
-    finally { setBusy(false); }
-  }
-
-  return (
-    <Modal
-      open
-      onClose={busy ? undefined : onClose}
-      dismissible={!busy}
-      title="New campaign"
-      description="Campaigns are reviewed by Marqueiver before creators can see them. You will be notified either way."
-    >
-      <form onSubmit={submit}>
-        <label htmlFor="c-title" className="field-label">Title</label>
-        <input
-          id="c-title" value={form.title} onChange={(e) => set('title', e.target.value)}
-          placeholder="What are you looking for?" maxLength={120} className="field"
-        />
-
-        <label htmlFor="c-brief" className="field-label mt-4">Brief</label>
-        <textarea
-          id="c-brief" value={form.brief} onChange={(e) => set('brief', e.target.value)}
-          rows={4} maxLength={2000}
-          placeholder="What the creator will make, and what you want it to achieve."
-          className="field resize-none"
-        />
-        <div className="flex justify-end mt-1.5">
-          <span className="text-xs text-muted tnum">{form.brief.length}/2000</span>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 mt-3">
-          <div>
-            <label htmlFor="c-budget" className="field-label">Budget per creator</label>
-            <input
-              id="c-budget" value={form.budget} onChange={(e) => set('budget', e.target.value)}
-              type="number" min="1" inputMode="decimal" placeholder="0" className="field tnum"
-            />
-          </div>
-          <div>
-            <label htmlFor="c-loc" className="field-label">Location</label>
-            <input
-              id="c-loc" value={form.location} onChange={(e) => set('location', e.target.value)}
-              className="field"
-            />
-          </div>
-        </div>
-
-        <label htmlFor="c-tags" className="field-label mt-4">Tags</label>
-        <input
-          id="c-tags" value={form.tags} onChange={(e) => set('tags', e.target.value)}
-          placeholder="beauty, skincare, reels" className="field"
-        />
-        <p className="text-xs text-muted mt-1.5">Comma separated. Creators use these to find you.</p>
-
-        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-6">
-          <button type="button" onClick={onClose} disabled={busy} className="btn-ghost">Cancel</button>
-          <button type="submit" disabled={busy || !valid} className="btn-cta">
-            {busy ? <><Spinner className="w-4 h-4" /> Sending…</> : 'Submit for review'}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
+/**
+ * Creating a campaign is no longer a modal.
+ *
+ * It was five fields — title, brief, budget, location, tags — which is not a
+ * brief: no deliverables, no timeline, no usage rights, so every campaign
+ * reached review missing the things a creator needs in order to apply. The
+ * eight-section wizard at `/campaigns/new` replaced it, and this page now links
+ * there. `CreateCampaignModal` was deleted rather than left unused.
+ */
 
 function ApplicantsModal({ campaign, onClose }) {
   const [applicants, setApplicants] = useState(null);
@@ -208,7 +130,6 @@ export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [showCreate, setShowCreate] = useState(false);
   const [applicantsFor, setApplicantsFor] = useState(null);
   const [applyingId, setApplyingId] = useState(null);
   const [submittingId, setSubmittingId] = useState(null);
@@ -288,12 +209,12 @@ export default function CampaignsPage() {
           : 'Clear the filter to see your other campaigns.')
         : 'New campaigns open regularly. Saved creators and your profile stay ready in the meantime.'}
       emptyAction={isBrand && filter === 'all'
-        ? <button onClick={() => setShowCreate(true)} className="btn-cta mt-2">Create a campaign</button>
+        ? <Link to="/campaigns/new" className="btn-cta mt-2">Create a campaign</Link>
         : isBrand ? <button onClick={() => setFilter('all')} className="btn-outline mt-1">Show all</button> : null}
       actions={isBrand && (
-        <button onClick={() => setShowCreate(true)} className="btn-cta">
+        <Link to="/campaigns/new" className="btn-cta">
           Create campaign <Send className="w-4 h-4" />
-        </button>
+        </Link>
       )}
       toolbar={isBrand && campaigns.length > 1 && filters && (
         <FilterRail options={filters} value={filter} onChange={setFilter} label="Filter campaigns" />
@@ -348,15 +269,20 @@ export default function CampaignsPage() {
                 {isBrand ? (
                   <div className="mt-3 space-y-2">
                     {needsResubmit && (
-                      <button
-                        onClick={() => submitForReview(c._id)}
-                        disabled={submittingId === c._id}
-                        className="btn-cta w-full text-sm"
-                      >
-                        {submittingId === c._id
-                          ? <Spinner className="w-4 h-4" />
-                          : c.status === 'rejected' ? 'Resubmit for review' : 'Submit for review'}
-                      </button>
+                      <>
+                        <Link to={`/campaigns/${c._id}/edit`} className="btn-outline w-full text-sm">
+                          Continue editing
+                        </Link>
+                        <button
+                          onClick={() => submitForReview(c._id)}
+                          disabled={submittingId === c._id}
+                          className="btn-cta w-full text-sm"
+                        >
+                          {submittingId === c._id
+                            ? <Spinner className="w-4 h-4" />
+                            : c.status === 'rejected' ? 'Resubmit for review' : 'Submit for review'}
+                        </button>
+                      </>
                     )}
                     <button
                       onClick={() => setApplicantsFor(c)}
@@ -396,12 +322,6 @@ export default function CampaignsPage() {
         })}
       </div>
 
-      {showCreate && (
-        <CreateCampaignModal
-          onClose={() => setShowCreate(false)}
-          onCreated={(c) => { setCampaigns((list) => [c, ...list]); setShowCreate(false); }}
-        />
-      )}
       {applicantsFor && (
         <ApplicantsModal campaign={applicantsFor} onClose={() => setApplicantsFor(null)} />
       )}

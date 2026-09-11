@@ -18,15 +18,208 @@ const applicantSchema = new Schema({
     decidedAt: Date,
 }, { _id: false });
 
+/**
+ * One thing the brand is asking for: three reels on Instagram, one 60-second
+ * YouTube integration, and so on.
+ *
+ * A deliverable is a subdocument rather than a string because every field on it
+ * is asked about separately downstream — "how many", "how long", "on which
+ * platform" — and a campaign whose deliverables are prose cannot answer any of
+ * them without a human reading it.
+ *
+ * `contentType` is not an enum: which content types a platform offers is a
+ * product list that changes (Instagram added Reels; YouTube added Shorts), and
+ * an enum here would mean a schema migration every time. The allowed set lives
+ * in `campaignBrief.schema.js`, which validates it per platform at the API
+ * boundary.
+ */
+const deliverableSchema = new Schema({
+    platform: { type: String, required: true },
+    contentType: { type: String, required: true },
+    quantity: { type: Number, default: 1, min: 1 },
+    /** Where the format has a length — a reel, a short, a video integration. */
+    durationSeconds: { type: Number, default: null },
+    /** Aspect/format note where it matters: "9:16", "carousel, 5 slides". */
+    format: { type: String, default: '' },
+    notes: { type: String, default: '' },
+}, { _id: false });
+
+/**
+ * A question the brand wants every applicant to answer.
+ *
+ * Stored with the campaign rather than as its own collection: the questions are
+ * part of the brief, they are versioned with it, and nothing else refers to
+ * them. `key` is a stable identifier so an answer can be matched to its
+ * question even after the prompt is reworded.
+ *
+ * Nothing reads these yet — applications are explicitly out of scope for this
+ * feature. They are captured here so the brief is complete when the answering
+ * side is built.
+ */
+const campaignQuestionSchema = new Schema({
+    key: { type: String, required: true },
+    prompt: { type: String, required: true },
+    type: { type: String, enum: ['short_text', 'long_text', 'single_choice', 'multi_choice', 'link', 'number'], default: 'short_text' },
+    required: { type: Boolean, default: false },
+    /** Only for the choice types. */
+    options: { type: [String], default: [] },
+}, { _id: false });
+
 const campaignSchema = new Schema({
     brand: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    /** Section A — campaign name. */
     title: { type: String, required: true },
+    /** Section A — campaign description. The wizard calls it "description". */
     brief: { type: String, default: '' },
+    /**
+     * Derived, never typed.
+     *
+     * The flat list of content types across `deliverables`, recomputed by the
+     * controller on every write. It predates the structured brief and is still
+     * read by campaign cards and by `applyToCampaign`, which seeds a deal's
+     * `terms.deliverables` from it — so it is kept in sync rather than
+     * duplicated by hand, which is how the two would drift apart.
+     */
     contentTypes: { type: [String], default: [] },
+    /**
+     * Section D — the fee per creator. This IS the creator fee; the wizard's
+     * "Creator fee" field writes here. There is deliberately no
+     * `commercials.creatorFee`: a second copy of the number the escrow is
+     * funded from is a number that can disagree with itself.
+     */
     budget: { type: Number, default: 0 },
     location: { type: String, default: 'India' },
     tags: { type: [String], default: [] },
+    /**
+     * Section E — the deliverable deadline, and the same field the deal
+     * inherits as `terms.deadline`. As with `budget`, `schedule` deliberately
+     * has no second copy of it.
+     */
     deadline: Date,
+
+    /* ── Section A — basic information ─────────────────────────────────── */
+
+    category: { type: String, default: '', index: true },
+    objective: { type: String, default: '' },
+    /** Product or campaign imagery, uploaded through the existing storage flow. */
+    images: { type: [String], default: [] },
+
+    /* ── Section B — platform and content requirements ─────────────────── */
+
+    /**
+     * Only the platforms Marqueiver actually integrates with. Validated at the
+     * API boundary against the same list the creator-side integrations use —
+     * asking for a TikTok deliverable would produce a campaign no creator on
+     * this platform can be matched against.
+     */
+    platforms: { type: [String], default: [] },
+    deliverables: { type: [deliverableSchema], default: [] },
+    guidelines: {
+        dos: { type: [String], default: [] },
+        donts: { type: [String], default: [] },
+        hashtags: { type: [String], default: [] },
+        mentions: { type: [String], default: [] },
+        cta: { type: String, default: '' },
+        notes: { type: String, default: '' },
+    },
+
+    /* ── Section C — creator requirements ──────────────────────────────── */
+
+    creatorRequirements: {
+        categories: { type: [String], default: [] },
+        locations: { type: [String], default: [] },
+        ageMin: { type: Number, default: null },
+        ageMax: { type: Number, default: null },
+        genders: { type: [String], default: [] },
+        followerMin: { type: Number, default: null },
+        followerMax: { type: Number, default: null },
+        /** Percentage, e.g. 2.5 — matched against CreatorProfile.avgEngagement. */
+        minEngagement: { type: Number, default: null },
+        languages: { type: [String], default: [] },
+        /** The creator's audience, as distinct from the creator themselves. */
+        audience: {
+            locations: { type: [String], default: [] },
+            ageRanges: { type: [String], default: [] },
+            genders: { type: [String], default: [] },
+            interests: { type: [String], default: [] },
+        },
+        experience: { type: String, default: '' },
+        /**
+         * Policy 13.1 levels, as a requirement rather than a claim. Nothing here
+         * verifies anything — these say which existing verification states a
+         * creator must already hold.
+         */
+        requireVerifiedIdentity: { type: Boolean, default: false },
+        requireVerifiedSocial: { type: Boolean, default: false },
+    },
+
+    /* ── Section D — budget and commercials ────────────────────────────── */
+
+    commercials: {
+        creatorCount: { type: Number, default: 1, min: 1 },
+        /**
+         * How the fee is settled. Every option still runs through the same
+         * escrow — this records what the fee covers, not a different money
+         * path, because there is only one.
+         */
+        paymentModel: { type: String, default: 'fixed' },
+        product: {
+            offered: { type: Boolean, default: false },
+            description: { type: String, default: '' },
+            /** Indicative retail value, for the creator to judge barter by. */
+            value: { type: Number, default: null },
+        },
+        travel: {
+            offered: { type: Boolean, default: false },
+            cap: { type: Number, default: null },
+            notes: { type: String, default: '' },
+        },
+        performanceBonus: {
+            offered: { type: Boolean, default: false },
+            description: { type: String, default: '' },
+        },
+    },
+
+    /* ── Section E — timeline ──────────────────────────────────────────── */
+
+    /**
+     * The deliverable deadline is `deadline` above, not a field here. The order
+     * these must fall in is enforced in `campaignBrief.schema.js`, at the API
+     * boundary, so a timeline that cannot happen never reaches the database.
+     */
+    schedule: {
+        campaignStart: Date,
+        applicationDeadline: Date,
+        selectionDeadline: Date,
+        collaborationStart: Date,
+        /** Working days the brand gets to approve or request revisions. */
+        reviewWindowDays: { type: Number, default: null },
+        campaignEnd: Date,
+    },
+
+    /* ── Section F — usage rights ──────────────────────────────────────── */
+
+    usageRights: {
+        durationMonths: { type: Number, default: null },
+        perpetual: { type: Boolean, default: false },
+        channels: { type: [String], default: [] },
+        paidAds: {
+            allowed: { type: Boolean, default: false },
+            durationMonths: { type: Number, default: null },
+        },
+        exclusivity: {
+            required: { type: Boolean, default: false },
+            category: { type: String, default: '' },
+            durationMonths: { type: Number, default: null },
+        },
+    },
+
+    /* ── Section G — additional requirements ───────────────────────────── */
+
+    extras: {
+        specialInstructions: { type: String, default: '' },
+        questions: { type: [campaignQuestionSchema], default: [] },
+    },
     /**
      * Campaign lifecycle.
      *

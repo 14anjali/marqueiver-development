@@ -3,6 +3,9 @@ import { catchAsync, ApiError } from '../../utils/apiError.js';
 import { ok, created } from '../../utils/respond.js';
 import { Campaign, CreatorProfile, Deal } from '../../models/index.js';
 import { CREATOR_VISIBLE_STATUSES, CAMPAIGN_EDITABLE_STATUSES } from '../../models/Campaign.js';
+import {
+    briefSchema, draftIssues, publishReadiness, deriveContentTypes,
+} from './campaignBrief.schema.js';
 import { INCLUDED_REVISIONS } from '../../models/Deal.js';
 import { notify } from '../notifications/notifications.service.js';
 import { openThread } from '../deals/negotiation.service.js';
@@ -23,17 +26,104 @@ import { transitionDeal } from '../deals/deals.service.js';
  * lifecycle logic is duplicated here.
  */
 
-export const createCampaignSchema = z.object({
-    title: z.string().min(3),
-    brief: z.string().max(2000).optional(),
-    contentTypes: z.array(z.string()).default([]),
+/**
+ * The wizard's own fields, on top of the structured brief.
+ *
+ * `budget` and `deadline` are here rather than inside the brief because they
+ * predate it and the rest of the product reads them — see the comments on the
+ * model. The wizard's "Creator fee" and "Deliverable deadline" inputs write
+ * these two, so there is one copy of each number, not two.
+ */
+const coreFields = {
+    title: z.string().trim().min(3).max(120),
+    brief: z.string().max(2000),
     budget: z.number().min(0),
-    location: z.string().optional(),
-    tags: z.array(z.string()).default([]),
-    deadline: z.string().optional(),
+    location: z.string().trim().max(80),
+    tags: z.array(z.string().trim().min(1).max(40)).max(20),
+    deadline: z.string().nullable(),
+};
+
+export const createCampaignSchema = briefSchema.extend({
+    title: coreFields.title,
+    brief: coreFields.brief.optional(),
+    /**
+     * Still accepted, still ignored on write: `contentTypes` is derived from
+     * `deliverables`. Kept in the schema because the object is `.strict()`
+     * elsewhere and an older client may still send it — refusing a request over
+     * a field the server computes itself would be a breaking change for no gain.
+     */
+    contentTypes: z.array(z.string()).optional(),
+    budget: coreFields.budget.optional(),
+    location: coreFields.location.optional(),
+    tags: coreFields.tags.optional(),
+    deadline: coreFields.deadline.optional(),
     /** false keeps it as a draft; anything else submits it for review. */
     submit: z.boolean().optional(),
 });
+
+/**
+ * Fold a validated payload onto a campaign document.
+ *
+ * Nested groups are merged rather than replaced: the wizard autosaves one
+ * section at a time, so a save from Section D that carried a bare
+ * `{ commercials: { creatorCount: 3 } }` would otherwise wipe the product and
+ * travel blocks the brand filled in a minute earlier.
+ *
+ * Arrays are the exception — they are replaced wholesale, because removing the
+ * third deliverable has to be expressible, and a merge cannot express a
+ * deletion.
+ */
+const GROUPS = ['guidelines', 'creatorRequirements', 'commercials', 'schedule', 'usageRights', 'extras'];
+
+function applyBrief(campaign, body) {
+    for (const key of ['title', 'brief', 'budget', 'location', 'tags', 'category', 'objective', 'images', 'platforms']) {
+        if (body[key] !== undefined) campaign[key] = body[key];
+    }
+
+    if (body.deadline !== undefined) {
+        campaign.deadline = body.deadline ? new Date(body.deadline) : undefined;
+    }
+
+    if (body.deliverables !== undefined) {
+        campaign.deliverables = body.deliverables;
+        // Derived on every write so the flat list the rest of the product reads
+        // can never disagree with the structured one.
+        campaign.contentTypes = deriveContentTypes(body.deliverables);
+    }
+
+    for (const group of GROUPS) {
+        if (body[group] === undefined) continue;
+        campaign.set(group, mergeGroup(campaign.get(group), body[group]));
+    }
+}
+
+/** One level of merge, deep enough for the nested blocks the brief actually has. */
+function mergeGroup(current, incoming) {
+    const base = current?.toObject?.() ?? current ?? {};
+    const out = { ...base };
+    for (const [k, v] of Object.entries(incoming)) {
+        if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+            out[k] = { ...(base[k]?.toObject?.() ?? base[k] ?? {}), ...v };
+        } else {
+            out[k] = v;
+        }
+    }
+    return out;
+}
+
+/**
+ * Contradictions are refused even on a draft.
+ *
+ * Not completeness — a draft is allowed to be as unfinished as the brand likes.
+ * These are the values that are wrong whatever else gets filled in later: a
+ * timeline that runs backwards, a minimum above its maximum, a deliverable on a
+ * platform the campaign does not use.
+ */
+function assertDraftIsCoherent(campaign) {
+    const issues = draftIssues(campaign.toObject ? campaign.toObject() : campaign);
+    if (issues.length) throw ApiError.unprocessable(issues[0], { issues });
+}
+
 export const createCampaign = catchAsync(async (req, res) => {
     if (req.auth.role !== 'brand') throw ApiError.forbidden('Only brands can create campaigns');
     const b = req.body;
@@ -43,26 +133,53 @@ export const createCampaign = catchAsync(async (req, res) => {
      *
      * `draft` when the brand is still working on it, `pending_review` when they
      * are submitting it now. Neither is discoverable by creators — the campaign
-     * becomes visible only when a reviewer approves it.
+     * becomes visible only when a reviewer approves it. The wizard's "Publish"
+     * is this submission: Marqueiver's review stands between a finished brief
+     * and a live one, and the wizard says so rather than implying instant
+     * publication.
      */
-    const submitting = b.submit !== false;
+    const submitting = b.submit === true;
 
-    const campaign = await Campaign.create({
-        brand: req.auth.sub,
-        title: b.title,
-        brief: b.brief ?? '',
-        contentTypes: b.contentTypes,
-        budget: b.budget,
-        location: b.location || 'India',
-        tags: b.tags,
-        deadline: b.deadline ? new Date(b.deadline) : undefined,
-        status: submitting ? 'pending_review' : 'draft',
-        review: submitting
-            ? { submittedAt: new Date(), submissionCount: 1 }
-            : { submissionCount: 0 },
-    });
+    const campaign = new Campaign({ brand: req.auth.sub, location: 'India' });
+    applyBrief(campaign, b);
+    assertDraftIsCoherent(campaign);
 
+    if (submitting) {
+        assertPublishable(campaign);
+        campaign.status = 'pending_review';
+        campaign.review = { submittedAt: new Date(), submissionCount: 1 };
+    } else {
+        campaign.status = 'draft';
+        campaign.review = { submissionCount: 0 };
+    }
+
+    await campaign.save();
     created(res, campaign);
+});
+
+/** The publish gate, in one place so create and submit cannot diverge. */
+function assertPublishable(campaign) {
+    const readiness = publishReadiness(campaign.toObject ? campaign.toObject() : campaign);
+    if (!readiness.ready) {
+        throw ApiError.unprocessable(
+            'This campaign is not ready to publish yet.',
+            { blocking: readiness.blocking, sections: readiness.sections },
+        );
+    }
+}
+
+/**
+ * What is still missing before this campaign can be published.
+ *
+ * The wizard's review step reads this rather than recomputing completeness, so
+ * "ready to publish" means the same thing on both sides of the wire. Owner-only:
+ * it describes an unpublished campaign.
+ */
+export const getPublishReadiness = catchAsync(async (req, res) => {
+    const campaign = await Campaign.findById(req.params.id).lean();
+    if (!campaign) throw ApiError.notFound('Campaign not found');
+    if (campaign.brand.toString() !== req.auth.sub) throw ApiError.forbidden();
+    ok(res, publishReadiness(campaign));
 });
 
 /**
@@ -86,6 +203,18 @@ export const submitCampaignForReview = catchAsync(async (req, res) => {
                 : `A ${campaign.status} campaign cannot be submitted for review.`,
         );
     }
+
+    /**
+     * The publish gate.
+     *
+     * A campaign a creator cannot act on must not reach the review queue: no
+     * deliverables, no fee, no deadline means a reviewer rejecting it and a
+     * brand waiting a day to find out what the wizard could have told them
+     * immediately. The wizard shows the same list — it reads
+     * `GET /:id/readiness`, which calls the same function — so this is the
+     * backstop rather than the first time the brand hears about it.
+     */
+    assertPublishable(campaign);
 
     campaign.status = 'pending_review';
     campaign.review = {
@@ -201,14 +330,15 @@ export const getCampaign = catchAsync(async (req, res) => {
  * decorative. Publication is a decision only a reviewer can make, so `open` is
  * not offered here at all.
  */
-export const updateCampaignSchema = z.object({
-    title: z.string().min(3).optional(),
-    brief: z.string().max(2000).optional(),
-    budget: z.number().min(0).optional(),
+export const updateCampaignSchema = briefSchema.extend({
+    title: coreFields.title.optional(),
+    brief: coreFields.brief.optional(),
+    budget: coreFields.budget.optional(),
+    /** Accepted and ignored — derived from `deliverables`. See createCampaignSchema. */
     contentTypes: z.array(z.string()).optional(),
-    tags: z.array(z.string()).optional(),
-    location: z.string().optional(),
-    deadline: z.string().optional(),
+    tags: coreFields.tags.optional(),
+    location: coreFields.location.optional(),
+    deadline: coreFields.deadline.optional(),
     // Closing early is the brand's own call; reopening is not.
     status: z.literal('closed').optional(),
 }).strict();
@@ -218,7 +348,7 @@ export const updateCampaign = catchAsync(async (req, res) => {
     if (!campaign) throw ApiError.notFound('Campaign not found');
     if (campaign.brand.toString() !== req.auth.sub) throw ApiError.forbidden();
 
-    const { status, deadline, ...content } = req.body;
+    const { status, ...content } = req.body;
 
     /**
      * Content is frozen once a campaign is live.
@@ -228,15 +358,15 @@ export const updateCampaign = catchAsync(async (req, res) => {
      * applications already submitted. To change a live campaign, close it and
      * submit a new one.
      */
-    if (Object.keys(content).length || deadline !== undefined) {
+    if (Object.keys(content).length) {
         if (!CAMPAIGN_EDITABLE_STATUSES.includes(campaign.status)) {
             throw ApiError.unprocessable(
                 `A ${campaign.status} campaign cannot be edited — creators have already seen these terms. `
                 + 'Close it and create a new campaign instead.',
             );
         }
-        Object.assign(campaign, content);
-        if (deadline !== undefined) campaign.deadline = deadline ? new Date(deadline) : undefined;
+        applyBrief(campaign, content);
+        assertDraftIsCoherent(campaign);
     }
 
     if (status === 'closed') {
