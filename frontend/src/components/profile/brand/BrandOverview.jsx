@@ -45,7 +45,10 @@ export default function BrandOverview({ profile, onEdit }) {
   const prefs = p.campaignPreferences ?? {};
   const level = p.verificationLevel ?? {};
   const totalAudience = socials.reduce((sum, s) => sum + (Number(s.followers) || 0), 0);
-  const completed = (deals ?? []).filter((d) => d.status === 'completed');
+  // `state`, not `status` — a Deal's lifecycle field is `state` (invitation …
+  // completed); `status` is the Campaign field. Reading the wrong one returned
+  // undefined for every deal, so the completed count was permanently zero.
+  const completed = (deals ?? []).filter((d) => d.state === 'completed');
 
   const section = withReducedMotion(rise, reduced);
 

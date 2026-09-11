@@ -50,7 +50,7 @@ export default function PreviousWork({ profile }) {
 
   const stats = useMemo(() => {
     if (!campaigns || !deals) return null;
-    const completed = deals.filter((d) => d.status === 'completed');
+    const completed = deals.filter((d) => d.state === 'completed');
     return {
       campaigns: campaigns.length,
       live: campaigns.filter((c) => c.status === 'open').length,
@@ -195,7 +195,7 @@ export default function PreviousWork({ profile }) {
                     <p className="text-xs text-muted"><Money amount={d.terms.amount} className="!text-xs" /></p>
                   )}
                 </div>
-                <StatusPill status={d.status} className="shrink-0" />
+                <StatusPill status={d.state} className="shrink-0" />
               </li>
             ))}
           </ul>

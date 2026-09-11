@@ -422,6 +422,17 @@ export const api = {
   transactions: () => req('/api/payments/transactions'),
   earnings: () => req('/api/payments/earnings'),
 
+  /**
+   * Brand payment methods — reference records of how a brand pays, not saved
+   * instruments. Escrow is still funded through `createPaymentSession` above
+   * and Cashfree's hosted checkout; nothing here is ever charged.
+   */
+  brandPaymentMethods: () => req('/api/payments/methods'),
+  addBrandPaymentMethod: (payload) => req('/api/payments/methods', { method: 'POST', body: payload }),
+  updateBrandPaymentMethod: (id, payload) => req(`/api/payments/methods/${id}`, { method: 'PATCH', body: payload }),
+  setDefaultBrandPaymentMethod: (id) => req(`/api/payments/methods/${id}/default`, { method: 'POST' }),
+  removeBrandPaymentMethod: (id) => req(`/api/payments/methods/${id}`, { method: 'DELETE' }),
+
   createReview: (dealId, payload) => req(`/api/reviews/deal/${dealId}`, { method: 'POST', body: payload }),
   reviewsForUser: (userId) => req(`/api/reviews/user/${userId}`),
   notifications: (unread = false) => req(`/api/notifications${unread ? '?unread=true' : ''}`),

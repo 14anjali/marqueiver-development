@@ -1,47 +1,34 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api } from '../../../lib/api';
-import { ErrorBlock, useToast } from '../../../lib/ui-state';
-import { Money, Skeleton, StatusPill } from '../../feedback';
-import { Wallet } from '../../icons';
+import { useToast } from '../../../lib/ui-state';
 import { SectionCard, SaveButton, Field, PrivateNotice } from '../shared';
+import PaymentMethods from './PaymentMethods';
+import CampaignPayments from './CampaignPayments';
 
 /**
- * Invoicing details, and what has actually been paid.
+ * Payment & Billing — three panels, in the order a brand needs them.
  *
- * ── Scope, and what is deliberately absent ─────────────────────────────────
+ *  1. **Invoicing details** (below) — the legal name and address that belong on
+ *     an invoice, Policy 4.1: "accurate company details, and GSTIN where
+ *     applicable, for invoicing".
+ *  2. **Payment accounts** (`PaymentMethods`) — reference records of how the
+ *     brand pays. Read that file's header before assuming they are chargeable;
+ *     they are not, and cannot be under the current Cashfree integration.
+ *  3. **Campaign payments** (`CampaignPayments`) — what is due, what is in
+ *     escrow, what has settled, and the full ledger with gateway references.
  *
- * Two things only: the legal name and address that belong on an invoice
- * (Policy 4.1 — "accurate company details, and GSTIN where applicable, for
- * invoicing"), and the real transaction history from
- * `GET /api/payments/transactions`.
+ * The three are separate files because each owns its own loading, error and
+ * empty states against a different endpoint; one component would mean one
+ * spinner for three independent requests.
  *
- * No card or bank detail is stored. Brands fund escrow through Cashfree at the
- * point of payment and the gateway holds the instrument; storing one here would
- * be inventing a payment feature that does not exist.
+ * ── Still deliberately absent ──────────────────────────────────────────────
  *
- * No Credits balance either. Policy 4.3 and Policy 6 define prepaid Credits for
+ * No Credits balance. Policy 4.3 and Policy 6 define prepaid Credits for
  * revealing creator information, and the backend implements none of it — no
  * model, no purchase, no consumption. A balance here would be a number with
  * nothing behind it, so the section says nothing about Credits at all rather
  * than showing a zero that looks like a real balance.
  */
-
-/** What each transaction type means to a brand, in its own words. */
-const TYPE_LABEL = {
-  escrow_fund: 'Funded into escrow',
-  escrow_release: 'Released to creator',
-  refund: 'Refunded to you',
-  payout: 'Payout',
-  fee: 'Platform fee',
-};
-
-/** Transaction status → the shared status vocabulary. */
-const TXN_STATUS = {
-  success: { status: 'completed', label: 'Paid' },
-  pending: { status: 'escrow_pending', label: 'Pending' },
-  failed: { status: 'disputed', label: 'Failed' },
-  reversed: { status: 'cancelled', label: 'Reversed' },
-};
 
 export default function PaymentBilling({ profile, onSaved }) {
   const [billing, setBilling] = useState(() => ({ ...(profile.billing ?? {}) }));
@@ -49,20 +36,7 @@ export default function PaymentBilling({ profile, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState(false);
 
-  const [txns, setTxns] = useState(null);
-  const [txnError, setTxnError] = useState(null);
-  const [nonce, setNonce] = useState(0);
-
   const toast = useToast();
-
-  useEffect(() => {
-    let alive = true;
-    setTxnError(null);
-    api.transactions()
-      .then(({ data }) => { if (alive) setTxns(data ?? []); })
-      .catch((e) => { if (alive) setTxnError(e); });
-    return () => { alive = false; };
-  }, [nonce]);
 
   const set = (k, v) => setBilling((b) => ({ ...b, [k]: v }));
 
@@ -78,16 +52,6 @@ export default function PaymentBilling({ profile, onSaved }) {
       || gstin !== (profile.gstin ?? ''),
     [billing, gstin, profile],
   );
-
-  const totals = useMemo(() => {
-    if (!txns) return null;
-    const paid = txns.filter((t) => t.status === 'success');
-    return {
-      funded: paid.filter((t) => t.type === 'escrow_fund').reduce((s, t) => s + (t.amount || 0), 0),
-      released: paid.filter((t) => t.type === 'escrow_release').reduce((s, t) => s + (t.amount || 0), 0),
-      refunded: paid.filter((t) => t.type === 'refund').reduce((s, t) => s + (t.amount || 0), 0),
-    };
-  }, [txns]);
 
   async function save() {
     setTouched(true);
@@ -179,84 +143,11 @@ export default function PaymentBilling({ profile, onSaved }) {
         </div>
       </SectionCard>
 
-      <SectionCard
-        title="Payment history"
-        description="Every escrow funding, release and refund on your account."
-      >
-        {txnError ? (
-          <ErrorBlock error={txnError} onRetry={() => setNonce((n) => n + 1)} />
-        ) : !txns ? (
-          <div aria-busy="true" aria-live="polite" aria-label="Loading payment history" className="space-y-2.5">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="flex items-center gap-3 py-3">
-                <Skeleton className="h-4 w-40 max-w-full rounded" />
-                <Skeleton className="h-4 w-20 rounded ml-auto" />
-              </div>
-            ))}
-          </div>
-        ) : !txns.length ? (
-          <div className="rounded-xl2 border border-dashed border-line bg-bg/60 p-8 text-center">
-            <span className="w-12 h-12 rounded-xl2 bg-white border border-line grid place-items-center mx-auto">
-              <Wallet className="w-5 h-5 text-brand-400" />
-            </span>
-            <p className="font-display font-bold text-ink mt-4">No payments yet</p>
-            <p className="text-sm text-muted mt-1.5 leading-relaxed max-w-sm mx-auto">
-              When you fund your first collaboration into escrow it appears here, with every
-              release and refund that follows.
-            </p>
-          </div>
-        ) : (
-          <>
-            {totals && (
-              <div className="grid grid-cols-3 gap-3 mb-5">
-                <Total label="Funded" amount={totals.funded} />
-                <Total label="Released" amount={totals.released} />
-                <Total label="Refunded" amount={totals.refunded} />
-              </div>
-            )}
+      {/* Reference records of how this brand pays. Never charged — see the file. */}
+      <PaymentMethods />
 
-            <ul className="divide-y divide-line">
-              {txns.slice(0, 50).map((t) => {
-                const s = TXN_STATUS[t.status] ?? { status: 'pending_review', label: t.status };
-                return (
-                  <li key={t._id} className="flex items-center justify-between gap-3 py-3">
-                    <div className="min-w-0">
-                      <p className="text-sm text-ink truncate">
-                        {TYPE_LABEL[t.type] ?? t.type}
-                      </p>
-                      <p className="text-xs text-muted">
-                        {t.createdAt && new Date(t.createdAt).toLocaleDateString('en-IN', {
-                          day: 'numeric', month: 'short', year: 'numeric',
-                        })}
-                        {t.gateway && t.gateway !== 'mock' && ` · ${t.gateway}`}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <Money amount={t.amount} className="!text-sm" />
-                      <StatusPill status={s.status} label={s.label} />
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-
-            {txns.length > 50 && (
-              <p className="text-xs text-muted mt-3">Showing the 50 most recent of {txns.length}.</p>
-            )}
-          </>
-        )}
-      </SectionCard>
-    </div>
-  );
-}
-
-function Total({ label, amount }) {
-  return (
-    <div className="panel-money rounded-xl2 p-4 text-center">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-money-700">{label}</p>
-      <p className="font-display font-extrabold text-lg text-ink mt-1">
-        <Money amount={amount} className="!text-lg" />
-      </p>
+      {/* Due / in escrow / settled, plus the full ledger. */}
+      <CampaignPayments />
     </div>
   );
 }

@@ -21,3 +21,4 @@ export { Policy, PolicyAcceptance, POLICY_SLUGS } from './Policy.js';
 export { Payout, CommissionRecord } from './Payout.js';
 export { DataDeletionRequest } from './DataDeletionRequest.js';
 export { InstagramMedia } from './InstagramMedia.js';
+export { BrandPaymentMethod, BRAND_PAYMENT_METHOD_TYPES } from './BrandPaymentMethod.js';
