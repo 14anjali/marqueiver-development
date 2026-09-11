@@ -440,7 +440,17 @@ export const api = {
 
   // Campaigns
   createCampaign: (payload) => req('/api/campaigns', { method: 'POST', body: payload }),
-  listCampaigns: (status) => req(`/api/campaigns${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  /**
+   * A brand's own campaigns (optionally by status), or the open catalogue for a
+   * creator. `params` carries the creator-side search and filters — q, category,
+   * platform, minBudget, maxBudget — which the same endpoint applies on top of
+   * the visibility rule, so filtering never happens only in the browser.
+   */
+  listCampaigns: (status, params = {}) => {
+    const qs = new URLSearchParams({ ...(status ? { status } : {}), ...params });
+    const query = qs.toString();
+    return req(`/api/campaigns${query ? `?${query}` : ''}`);
+  },
 
   /**
    * Put a draft or rejected campaign back into the review queue.

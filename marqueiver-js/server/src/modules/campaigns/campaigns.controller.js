@@ -1,11 +1,13 @@
 import { z } from 'zod';
 import { catchAsync, ApiError } from '../../utils/apiError.js';
 import { ok, created } from '../../utils/respond.js';
-import { Campaign, CreatorProfile, Deal } from '../../models/index.js';
+import { Campaign, CreatorProfile, Deal, User, Verification } from '../../models/index.js';
 import { CREATOR_VISIBLE_STATUSES, CAMPAIGN_EDITABLE_STATUSES } from '../../models/Campaign.js';
 import {
     briefSchema, draftIssues, publishReadiness, deriveContentTypes,
 } from './campaignBrief.schema.js';
+import { brandSummariesFor, brandSummaryFor } from './brandSummary.service.js';
+import { creatorEligibility, applicationWindow } from './campaignEligibility.service.js';
 import { INCLUDED_REVISIONS } from '../../models/Deal.js';
 import { notify } from '../notifications/notifications.service.js';
 import { openThread } from '../deals/negotiation.service.js';
@@ -251,21 +253,79 @@ export const listCampaigns = catchAsync(async (req, res) => {
          */
         filter = { status: { $in: CREATOR_VISIBLE_STATUSES } };
         if (req.query.brand) filter.brand = req.query.brand;
+        Object.assign(filter, discoveryFilters(req.query));
     }
     const items = await Campaign.find(filter).sort({ createdAt: -1 }).limit(100).lean();
 
     if (req.auth.role === 'brand') return ok(res, items);
 
-    // Creators get their own application state on every row, so the browse
-    // list can render Applied/Accepted from server data rather than from
-    // local React state that dies on refresh.
+    /**
+     * Creators get three things the raw document does not carry.
+     *
+     *  - `myApplication`, so the browse list renders Applied/Accepted from
+     *    server data rather than from local React state that dies on refresh.
+     *  - `brandSummary`, so a card can show who is asking and whether they are
+     *    verified — a campaign stores only the brand's User id.
+     *  - `applicationWindow`, so a campaign whose deadline has passed says so
+     *    instead of offering an Apply button that leads nowhere useful.
+     *
+     * The brand summaries are fetched in one batch for the whole page; a
+     * lookup per campaign would be forty queries on a page of twenty.
+     */
+    const summaries = await brandSummariesFor(items);
+
     const shaped = items.map((c) => {
         const mine = c.applicants?.find((a) => a.creator.toString() === req.auth.sub) ?? null;
-        const { applicants, ...rest } = c;
-        return { ...rest, myApplication: mine };
+        const { applicants, review, ...rest } = c;
+        return {
+            ...rest,
+            myApplication: mine,
+            brandSummary: summaries.get(String(c.brand)) ?? null,
+            applicationWindow: applicationWindow(c),
+        };
     });
     ok(res, shaped);
 });
+
+/**
+ * The creator-facing search and filters.
+ *
+ * Built onto the existing `GET /api/campaigns` rather than a second discovery
+ * endpoint: the visibility rule that keeps unapproved campaigns invisible lives
+ * in that handler, and a parallel endpoint is how a second copy of that rule
+ * ends up drifting from the first.
+ *
+ * Every clause is additive to the status filter, never a replacement for it —
+ * `Object.assign` onto the caller's filter cannot remove the status constraint,
+ * and a test asserts that.
+ */
+function discoveryFilters(query = {}) {
+    const filter = {};
+
+    const q = String(query.q ?? '').trim();
+    if (q) {
+        // No text index exists on Campaign, so this is a case-insensitive
+        // match on the two fields a creator actually searches by. Escaped,
+        // because an unescaped "(" from a search box is a thrown error.
+        const safe = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const rx = new RegExp(safe, 'i');
+        filter.$or = [{ title: rx }, { brief: rx }, { tags: rx }];
+    }
+
+    if (query.category) filter.category = String(query.category);
+    if (query.platform) filter.platforms = String(query.platform);
+
+    const min = Number(query.minBudget);
+    const max = Number(query.maxBudget);
+    if (Number.isFinite(min) || Number.isFinite(max)) {
+        filter.budget = {
+            ...(Number.isFinite(min) ? { $gte: min } : {}),
+            ...(Number.isFinite(max) ? { $lte: max } : {}),
+        };
+    }
+
+    return filter;
+}
 
 /**
  * Campaigns this creator has applied to (§10 — "Browse Applied Campaigns").
@@ -316,6 +376,36 @@ export const getCampaign = catchAsync(async (req, res) => {
         campaign.applicantCount = undefined;
         // Review notes are between the brand and Marqueiver.
         delete campaign.review;
+
+        /**
+         * Everything the creator needs to decide whether to apply, answered
+         * here rather than in the browser.
+         *
+         * `eligibility` is advisory — see `campaignEligibility.service.js`.
+         * Nothing in it blocks an application, and `applyToCampaign` is
+         * unchanged: the brand decides who it works with, and a creator just
+         * under a follower floor may still be exactly who it wants.
+         */
+        const [summary, profile, user] = await Promise.all([
+            brandSummaryFor(campaign.brand),
+            CreatorProfile.findOne({ user: req.auth.sub }).lean(),
+            User.findById(req.auth.sub).select('phoneVerified emailVerified').lean(),
+        ]);
+
+        const verifiedSocial = await Verification.exists({
+            subject: req.auth.sub, kind: 'social', status: 'approved',
+        });
+
+        campaign.brandSummary = summary;
+        campaign.applicationWindow = applicationWindow(campaign);
+        campaign.eligibility = creatorEligibility(campaign, profile, user, {
+            verifiedSocial: Boolean(verifiedSocial),
+        });
+    } else {
+        // The owner sees who is asking too — the same summary, so the brand's
+        // own preview and the creator's view render from one shape.
+        campaign.brandSummary = await brandSummaryFor(campaign.brand);
+        campaign.applicationWindow = applicationWindow(campaign);
     }
     ok(res, campaign);
 });

@@ -24,6 +24,7 @@ import CreatorProfilePage from './pages/CreatorProfilePage';
 import BrandProfilePage from './pages/BrandProfilePage';
 import CampaignsPage from './pages/CampaignsPage';
 import CampaignCreatePage from './pages/CampaignCreatePage';
+import CampaignDetailPage from './pages/CampaignDetailPage';
 import DealsPage from './pages/DealsPage';
 import DealDetailPage from './pages/DealDetailPage';
 import MessagesPage from './pages/MessagesPage';
@@ -191,6 +192,12 @@ export default function App() {
                 the route as well as in the controller. */}
             <Route path="/campaigns/new" element={<RoleRoute allow={['brand']}><CampaignCreatePage /></RoleRoute>} />
             <Route path="/campaigns/:id/edit" element={<RoleRoute allow={['brand']}><CampaignCreatePage /></RoleRoute>} />
+            {/* Declared after /campaigns/new and /campaigns/:id/edit so neither
+                is captured as an id. Open to both roles: a creator reads the
+                brief, and a brand can see its own campaign the way a creator
+                will. Visibility is enforced server-side — an unapproved
+                campaign is a 404 to anyone but its owner. */}
+            <Route path="/campaigns/:id" element={<Ready><CampaignDetailPage /></Ready>} />
             <Route path="/deals" element={<Ready><DealsPage /></Ready>} />
             <Route path="/deals/:id" element={<Ready><DealDetailPage /></Ready>} />
             <Route path="/messages" element={<Ready><MessagesPage /></Ready>} />
