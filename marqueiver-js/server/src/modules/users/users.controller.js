@@ -21,6 +21,19 @@ export const getMyProfile = catchAsync(async (req, res) => {
 export const updateCreatorSchema = z.object({
     displayName: z.string().optional(),
     avatarUrl: z.string().max(500).optional(),
+    /**
+     * Cover/banner image.
+     *
+     * `coverUrl` has been on the CreatorProfile model since it was written and
+     * was missing from this schema, so `PATCH /me/creator` stripped it and
+     * Mongoose's strict mode would have dropped it anyway. The only code that
+     * ever touched the field was account deletion, clearing it. It was a field
+     * nothing could write — added here so the banner in the profile editor can
+     * actually save.
+     */
+    coverUrl: z.string().max(500).optional(),
+    /** External portfolio / reel / media-kit URL. */
+    portfolioLink: z.string().url().or(z.literal('')).optional(),
     headline: z.string().optional(),
     bio: z.string().optional(),
     categories: z.array(z.string().max(40)).max(15).optional(),
@@ -224,7 +237,7 @@ export const getUploadUrlSchema = z.object({
     // Previously this endpoint was hard-restricted to brands only (for the
     // logo use case), which silently broke it for creator Portfolio uploads
     // (PortfolioPage.jsx calls this same endpoint) — fixed to be role-agnostic.
-    purpose: z.enum(['brand-logo', 'portfolio', 'verification', 'avatar']).default('portfolio'),
+    purpose: z.enum(['brand-logo', 'portfolio', 'verification', 'avatar', 'banner']).default('portfolio'),
 });
 export const getLogoUploadUrl = catchAsync(async (req, res) => {
     const { fileName, contentType, purpose } = req.body;
@@ -234,6 +247,7 @@ export const getLogoUploadUrl = catchAsync(async (req, res) => {
     const folder = purpose === 'brand-logo' ? 'brand-logos'
         : purpose === 'verification' ? 'verification-docs'
         : purpose === 'avatar' ? 'avatars'
+        : purpose === 'banner' ? 'banners'
         : 'portfolio';
     const key = `${folder}/${req.auth.sub}/${Date.now()}-${fileName}`;
     const urls = await getUploadUrl(key, contentType);

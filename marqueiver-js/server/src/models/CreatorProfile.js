@@ -88,6 +88,16 @@ const creatorSchema = new Schema({
     availability: { type: Boolean, default: true, index: true },
     // Portfolio (feature #10) — creator-uploaded work samples, real data only.
     portfolio: { type: [portfolioItemSchema], default: [] },
+
+    /**
+     * An external portfolio, reel or media-kit URL.
+     *
+     * Separate from `portfolio` above, which holds work samples hosted by us.
+     * Plenty of creators keep their real book on Behance, a Drive folder or
+     * their own site, and before this there was nowhere to put that — so the
+     * link ended up in the bio, where it is not clickable and not structured.
+     */
+    portfolioLink: { type: String, default: '' },
     // Withdrawal destination for wallet payouts (feature: Wallet + Cashfree
     // Payouts). Stored once, reused on every withdrawal request.
     payoutMethod: {

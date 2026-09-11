@@ -27,6 +27,21 @@ router.get('/auth/facebook/callback', oauthLimiter, c.facebookCallback);
 router.get('/facebook/pages', authenticate, c.listFacebookPages);
 router.post('/facebook/pages/select', authenticate, c.selectFacebookPage);
 
+/* ── Several Pages ─────────────────────────────────────────────────────────
+ * A creator may administer more than one Page and connect all of them. These
+ * three are what the profile screen uses; everything above and below keeps
+ * working on the primary Page when no `pageId` is given, so nothing that
+ * predates multi-Page had to change.
+ *
+ * `/pages/connected` is a separate path from `/pages` on purpose: `/pages`
+ * asks Facebook what this person *could* connect, this asks us what they have.
+ * Folding both into one endpoint would mean a live Meta call on every render
+ * of the profile page.
+ */
+router.get('/facebook/pages/connected', authenticate, c.listConnectedPages);
+router.post('/facebook/pages/primary', authenticate, c.setPrimaryPage);
+router.delete('/facebook/pages/:pageId', authenticate, c.disconnectFacebookPage);
+
 /* ── The connected Page ────────────────────────────────────────────────────── */
 router.get('/facebook/profile', authenticate, c.getFacebookProfile);
 router.get('/facebook/insights', authenticate, c.getFacebookInsights);

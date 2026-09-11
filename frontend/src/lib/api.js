@@ -233,6 +233,31 @@ export const api = {
   selectFacebookPage: (pageId) =>
     req('/api/facebook/pages/select', { method: 'POST', body: { pageId } }),
 
+  /* ── Several Pages ───────────────────────────────────────────────────────
+   * A creator may administer more than one Page and connect all of them. The
+   * endpoints above still answer for the primary Page when no id is given, so
+   * these are additions rather than replacements.
+   */
+
+  /** Add several Pages in one request, rather than one call per tick-box. */
+  selectFacebookPages: (pageIds) =>
+    req('/api/facebook/pages/select', { method: 'POST', body: { pageIds } }),
+
+  /** The Pages this user has connected — read from us, not from Facebook. */
+  connectedFacebookPages: () => req('/api/facebook/pages/connected'),
+
+  /** Nominate the Page shown on the public profile and used by discovery. */
+  setPrimaryFacebookPage: (pageId) =>
+    req('/api/facebook/pages/primary', { method: 'POST', body: { pageId } }),
+
+  /** Remove one Page, leaving the rest connected. */
+  disconnectFacebookPage: (pageId) =>
+    req(`/api/facebook/pages/${encodeURIComponent(pageId)}`, { method: 'DELETE' }),
+
+  /** Sync one Page; without an id every connected Page is refreshed. */
+  syncFacebookPage: (pageId) =>
+    req('/api/facebook/sync', { method: 'POST', body: pageId ? { pageId } : undefined }),
+
   facebookPosts: (limit = 25) => req(`/api/facebook/posts?limit=${limit}`),
   publishFacebookPost: ({ message, link }) =>
     req('/api/facebook/posts', { method: 'POST', body: { message, link } }),
@@ -283,6 +308,9 @@ export const api = {
   onboardingState: () => req('/api/users/me/onboarding'),
   avatarUploadUrl: (fileName, contentType) =>
     req('/api/users/me/logo-upload-url', { method: 'POST', body: { fileName, contentType, purpose: 'avatar' } }),
+  /** Cover/banner image for the creator profile header. */
+  bannerUploadUrl: (fileName, contentType) =>
+    req('/api/users/me/logo-upload-url', { method: 'POST', body: { fileName, contentType, purpose: 'banner' } }),
   updateCreator: (payload) => req('/api/users/me/creator', { method: 'PATCH', body: payload }),
   updateBrand: (payload) => req('/api/users/me/brand', { method: 'PATCH', body: payload }),
   logoUploadUrl: (fileName, contentType) => req('/api/users/me/logo-upload-url', { method: 'POST', body: { fileName, contentType, purpose: 'brand-logo' } }),

@@ -145,8 +145,13 @@ export async function connectedPlatforms(userId) {
     const [ig, fb, yt] = await Promise.all([
         InstagramAccount.findOne({ user: userId, status: 'connected' })
             .select('username followers accountType').lean(),
+        // A user may have several connected Pages; the primary one is the
+        // Page that represents them publicly, so that is the one reported
+        // here. The sort makes the answer stable rather than whichever row
+        // the storage engine returned first.
         FacebookPage.findOne({ user: userId, status: 'connected' })
-            .select('name facebookPageId followers').lean(),
+            .sort({ isPrimary: -1, createdAt: 1 })
+            .select('name facebookPageId followersCount').lean(),
         YouTubeChannel.findOne({ user: userId, status: 'connected' })
             .select('title youtubeChannelId subscriberCount thumbnails').lean(),
     ]);
@@ -164,7 +169,11 @@ export async function connectedPlatforms(userId) {
         connected.push({
             platform: 'facebook',
             handle: fb.name ?? 'Facebook Page',
-            followers: fb.followers ?? 0,
+            // `fb.followers` — the field on the model is `followersCount`, and
+            // the projection above asked for `followers`, so this read
+            // `undefined` and every connected Page reported 0 followers on the
+            // onboarding "connected accounts" list.
+            followers: fb.followersCount ?? 0,
         });
     }
     if (yt) {

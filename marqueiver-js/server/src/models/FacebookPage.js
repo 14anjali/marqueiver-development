@@ -32,9 +32,27 @@ const facebookPageSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
-      unique: true,        // one connected Page per Marq user
+      // NOT unique any more — a creator may run several Pages and connect all
+      // of them. See the index block at the bottom for what now guarantees
+      // uniqueness, and `utils/migrate-facebook-multipage.js` for dropping the
+      // old single-Page index on an existing database.
       index: true,
     },
+
+    /**
+     * The Page shown on the creator's public profile and in discovery.
+     *
+     * Exactly one connected Page per user carries this. It exists because
+     * `CreatorProfile.socialAccounts` holds one entry per platform — a handle
+     * and a follower count — and three Pages cannot honestly be folded into one
+     * handle. Rather than inventing a combined figure, the creator says which
+     * Page represents them and that is the one brands see; the others are
+     * managed here without touching discovery ranking.
+     *
+     * Maintained by `setPrimaryPage()` in the controller, which clears the flag
+     * from the user's other Pages in the same operation.
+     */
+    isPrimary: { type: Boolean, default: false },
 
     /**
      * The Facebook Page id.
@@ -122,14 +140,44 @@ const facebookPageSchema = new mongoose.Schema(
 );
 
 /**
- * One Facebook Page belongs to one Marq user.
+ * A Facebook Page belongs to exactly one Marq user.
  *
  * The original index was `{ user, facebookPageId }`, which stopped a single
  * user connecting the same Page twice and did nothing about two users both
  * claiming it — the opposite of what was needed. Sparse, because the Page id is
  * absent while a connection is in `pending_selection`.
+ *
+ * This is also what prevents duplicates now that a user may hold several Pages:
+ * a globally unique Page id means the same Page cannot be added twice by the
+ * same person *or* claimed by two different people. `selectFacebookPage` is
+ * therefore idempotent — re-adding a Page you already have updates it rather
+ * than creating a second row.
  */
 facebookPageSchema.index({ facebookPageId: 1 }, { unique: true, sparse: true });
+
+/**
+ * One authorisation session per user.
+ *
+ * The row with `status: 'pending_selection'` holds the long-lived *user* token
+ * between finishing OAuth and choosing Pages, and has no Page id. Without this
+ * index, re-authorising twice in a row would leave two half-finished sessions
+ * and the second `listFacebookPages` could read the wrong one.
+ *
+ * `partialFilterExpression` rather than `sparse`: the constraint applies only
+ * to pending rows, so it does not restrict a user to one *connected* Page —
+ * which is the whole point of this change.
+ */
+facebookPageSchema.index(
+  { user: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: 'pending_selection' },
+    name: 'one_pending_selection_per_user',
+  },
+);
+
+/** Fast "this user's connected Pages", the query the profile screen makes. */
+facebookPageSchema.index({ user: 1, status: 1 });
 
 /** Can this user publish to this Page, per Facebook's own answer? */
 facebookPageSchema.methods.canPublish = function canPublish() {

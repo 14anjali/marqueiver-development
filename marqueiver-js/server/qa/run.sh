@@ -8,8 +8,14 @@ fail=0
 step () { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
 step "1/6  unit suite"
-npm test 2>&1 | grep -E '^# (tests|pass|fail|skipped)' || fail=1
-npm test 2>&1 | grep -qE '^# fail 0$' || { echo "  FAILING TESTS"; fail=1; }
+# `cd "$ROOT"` because `npm test` resolves package.json from the working
+# directory, not from the script. Run from the project root it found no test
+# script, printed no summary lines, and the gate reported FAILING TESTS on a
+# perfectly good tree — a false alarm that is expensive precisely because it
+# looks like the real thing. Every other gate already takes absolute paths.
+unit_out="$(cd "$ROOT" && npm test 2>&1)"
+echo "$unit_out" | grep -E '^# (tests|pass|fail|skipped)' || fail=1
+echo "$unit_out" | grep -qE '^# fail 0$' || { echo "  FAILING TESTS"; fail=1; }
 
 step "2/6  import/export integrity"
 # Reports the counts AND fails on a nonzero problem count. It only printed the
