@@ -1,7 +1,8 @@
 import { logger } from '../config/logger.js';
 import { ApiError } from '../utils/apiError.js';
 import { describeError } from '../utils/describeError.js';
-import { InstagramAccount, InstagramMedia, FacebookPage, CreatorProfile } from '../models/index.js';
+import { InstagramAccount, InstagramMedia, FacebookPage } from '../models/index.js';
+import { resolveSocialProfile } from './socialConnect.service.js';
 import * as ig from './instagram.service.js';
 import * as fb from './facebook.service.js';
 
@@ -277,7 +278,9 @@ export async function syncFacebook(page, { postLimit = 25 } = {}) {
  * how a creator ends up listed with follower counts they no longer have.
  */
 async function mirrorToCreatorProfile(userId, platform, { handle, followers }) {
-    const creator = await CreatorProfile.findOne({ user: userId });
+    // Creator OR brand — the scheduled sync ran for brand-owned accounts
+    // and mirrored nothing, so their figures never refreshed.
+    const creator = await resolveSocialProfile(userId);
     if (!creator) return;
 
     const existing = creator.socialAccounts?.find((s) => s.platform === platform);

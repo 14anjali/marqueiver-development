@@ -1,10 +1,10 @@
 import { catchAsync, ApiError } from '../../utils/apiError.js';
-import { assertNotLinkedElsewhere } from '../../services/socialConnect.service.js';
+import { assertNotLinkedElsewhere, resolveSocialProfile, pullSocialEntry } from '../../services/socialConnect.service.js';
 import { ok } from '../../utils/respond.js';
 import { env } from '../../config/env.js';
 import { logger } from '../../config/logger.js';
 import { verifyAccess } from '../../utils/tokens.js';
-import { FacebookPage, CreatorProfile, User } from '../../models/index.js';
+import { FacebookPage, User } from '../../models/index.js';
 import * as fb from '../../services/facebook.service.js';
 import { describeError, userFacingMessage } from '../../utils/describeError.js';
 import { syncFacebook as syncPage } from '../../services/socialSync.service.js';
@@ -34,7 +34,7 @@ import { syncFacebook as syncPage } from '../../services/socialSync.service.js';
  *    constraint is on `facebookPageId`, which is what actually prevents
  *    duplicates — the same Page cannot be added twice by one person, nor
  *    claimed by two. `selectFacebookPage` is idempotent as a result.
- *  - **One primary Page.** `CreatorProfile.socialAccounts` holds a single
+ *  - **One primary Page.** The profile's `socialAccounts` holds a single
  *    handle-and-follower pair per platform, and folding three Pages into one
  *    pair would misstate which audience belongs to which account. The creator
  *    nominates the Page that represents them publicly; the rest are managed
@@ -345,7 +345,7 @@ async function persistSelectedPage(userId, page, tokenInfo) {
 }
 
 /**
- * Copy the primary Page onto `CreatorProfile.socialAccounts`, the shape
+ * Copy the primary Page onto the profile's `socialAccounts`, the shape
  * discovery and the public profile read.
  *
  * One place rather than inline at each call site, because there are now four
@@ -358,7 +358,8 @@ async function persistSelectedPage(userId, page, tokenInfo) {
  * creator with a Facebook audience of zero.
  */
 async function mirrorPrimaryPage(userId) {
-  const creator = await CreatorProfile.findOne({ user: userId });
+  // Creator OR brand: the mirror previously found nothing for a brand.
+  const creator = await resolveSocialProfile(userId);
   if (!creator) return;
 
   const primary = await FacebookPage.findOne({ user: userId, status: 'connected' })
@@ -776,10 +777,9 @@ export const disconnectFacebook = catchAsync(async (req, res) => {
   // Every Page, as before. A single Page is removed by
   // `DELETE /facebook/pages/:pageId` instead.
   await FacebookPage.deleteMany({ user: userId });
-  await CreatorProfile.findOneAndUpdate(
-    { user: userId },
-    { $pull: { socialAccounts: { platform: 'facebook' } } },
-  );
+  // Pulls from whichever profile the user has — a brand disconnecting used
+  // to keep a stale follower figure on its profile forever.
+  await pullSocialEntry(userId, 'facebook');
   await User.findByIdAndUpdate(userId, { $pull: { connectedAccounts: 'facebook' } });
 
   ok(res, { message: 'Facebook disconnected successfully' });

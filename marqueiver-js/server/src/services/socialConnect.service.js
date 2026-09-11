@@ -1,5 +1,7 @@
 import { ApiError } from '../utils/apiError.js';
-import { InstagramAccount, FacebookPage, YouTubeChannel } from '../models/index.js';
+import {
+    InstagramAccount, FacebookPage, YouTubeChannel, CreatorProfile, BrandProfile,
+} from '../models/index.js';
 import { ELIGIBLE_INSTAGRAM_ACCOUNT_TYPES } from '../models/InstagramAccount.js';
 
 /**
@@ -185,4 +187,49 @@ export async function connectedPlatforms(userId) {
         });
     }
     return connected;
+}
+
+/* ────────────────────── whose profile holds the socials ────────────────────── */
+
+/**
+ * The profile document that mirrors this user's connected social accounts.
+ *
+ * Every integration used to write `CreatorProfile.findOne({ user })` directly.
+ * The OAuth routes are not role-gated, so a brand could complete a Facebook or
+ * Instagram connection and get a real `FacebookPage` / `InstagramAccount` row —
+ * and then the mirror found no CreatorProfile, silently did nothing, and the
+ * brand's connected stats existed in the database but appeared nowhere. The
+ * connection looked broken while being perfectly intact.
+ *
+ * Resolved by document rather than by role because most mirror sites have only
+ * a user id in hand — a sync job iterating accounts, a Meta deletion callback —
+ * and fetching the User purely to read `role` would add a query to each. A user
+ * has exactly one profile, so whichever exists is the right one.
+ *
+ * Both models carry the same `socialAccounts` sub-schema, so the mirrored entry
+ * is identical either way.
+ *
+ * @returns {Promise<import('mongoose').Document|null>} hydrated, ready to save
+ */
+export async function resolveSocialProfile(userId) {
+    const [creator, brand] = await Promise.all([
+        CreatorProfile.findOne({ user: userId }),
+        BrandProfile.findOne({ user: userId }),
+    ]);
+    return creator ?? brand ?? null;
+}
+
+/**
+ * Remove a platform's mirrored entry, whichever profile the user has.
+ *
+ * The disconnect handlers each did this against `CreatorProfile` alone, so a
+ * brand disconnecting Instagram removed the `InstagramAccount` row but left the
+ * stale follower figure on its public profile indefinitely.
+ */
+export async function pullSocialEntry(userId, platform) {
+    const update = { $pull: { socialAccounts: { platform } } };
+    await Promise.all([
+        CreatorProfile.findOneAndUpdate({ user: userId }, update),
+        BrandProfile.findOneAndUpdate({ user: userId }, update),
+    ]);
 }

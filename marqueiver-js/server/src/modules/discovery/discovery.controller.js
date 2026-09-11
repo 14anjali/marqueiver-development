@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { catchAsync, ApiError } from '../../utils/apiError.js';
 import { ok } from '../../utils/respond.js';
-import { CreatorProfile, BrandProfile, SavedCreator } from '../../models/index.js';
+import { CreatorProfile, BrandProfile, SavedCreator, User } from '../../models/index.js';
+import { brandVerificationLevel } from '../../services/verificationLevel.service.js';
 /**
  * Faceted creator discovery (proposal §5.2). All filters map to indexed fields.
  * Results paginate; the list view never fans out per-row (proposal §4.1).
@@ -34,6 +35,32 @@ export const searchCreatorsSchema = z.object({
  * on a discovery response.
  */
 const PRIVATE_CREATOR_FIELDS = '-payoutMethod -pan -phone -email -kyc';
+
+/**
+ * What a creator must never receive about a brand.
+ *
+ * `getBrandProfile` and `searchBrands` both returned the entire BrandProfile
+ * document with no projection, so every authenticated user — every creator on
+ * the platform — could read a brand's private contact details and, once the
+ * Account Center added them, its GSTIN and invoicing address. The creator side
+ * has had `PRIVATE_CREATOR_FIELDS` since the payout leak was fixed; the brand
+ * side had no equivalent.
+ *
+ * Policy 2.4 governs what is shared, and Policy 4.1 records GSTIN for
+ * invoicing — not for publication. So:
+ *
+ *   gstin, billing          tax and invoicing identifiers for a legal entity
+ *   contactEmail/Phone      direct contact, which also routes around the
+ *                           platform's own messaging and the fee that goes
+ *                           with it (Policy 4.2)
+ *   contactPerson           a named individual at the company
+ *   teamMembers             ditto, for everyone else there
+ *
+ * What a creator DOES still get is everything needed to judge a brand:
+ * name, logo, banner, tagline, about, industry, categories, website,
+ * location, socials, trust scores and verification state.
+ */
+const PRIVATE_BRAND_FIELDS = '-gstin -billing -contactEmail -contactPhone -contactPerson -teamMembers';
 
 export const searchCreators = catchAsync(async (req, res) => {
     const p = req.query;
@@ -92,16 +119,39 @@ export const searchBrands = catchAsync(async (req, res) => {
         filter.$text = { $search: q };
     if (industry)
         filter.industry = industry;
-    const items = await BrandProfile.find(filter).sort({ 'trust.overall': -1 }).limit(20).lean();
+    const items = await BrandProfile.find(filter)
+        .select(PRIVATE_BRAND_FIELDS)
+        .sort({ 'trust.overall': -1 }).limit(20).lean();
     ok(res, items);
 });
 
 /** Single brand profile by BrandProfile id — was missing entirely; the brand
  * profile page previously had no way to fetch a specific brand's real data. */
 export const getBrandProfile = catchAsync(async (req, res) => {
-    const brand = await BrandProfile.findById(req.params.id).lean();
+    // Projected — see PRIVATE_BRAND_FIELDS. A brand reading its own profile
+    // uses GET /users/me/profile, which is unprojected by design.
+    const brand = await BrandProfile.findById(req.params.id)
+        .select(PRIVATE_BRAND_FIELDS).lean();
     if (!brand) throw ApiError.notFound('Brand not found');
-    ok(res, brand);
+
+    /*
+      The verification level, so a creator can see that a brand is verified
+      without seeing anything that was used to verify it. Policy 13.5: the
+      documents themselves are never displayed to other users, and none are
+      returned here — only the derived level.
+    */
+    const user = await User.findById(brand.user).select('phoneVerified emailVerified').lean();
+    const level = brandVerificationLevel(brand, user);
+
+    ok(res, {
+        ...brand,
+        verificationLevel: {
+            level: level.level,
+            label: level.label,
+            brandVerified: level.brandVerified,
+            gstVerified: level.gstVerified,
+        },
+    });
 });
 /**
  * Creator deep-dive. The AI compatibility score that used to be attached here

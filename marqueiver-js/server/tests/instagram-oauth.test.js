@@ -378,7 +378,7 @@ test('a missing account_type is accepted under Business Login and refused elsewh
  */
 async function runCallback({ handler, expectMeCall }) {
     const { instagramCallback } = await import('../src/modules/instagram/instagram.controller.js');
-    const { InstagramAccount, CreatorProfile, User } = await import('../src/models/index.js');
+    const { InstagramAccount, CreatorProfile, BrandProfile, User } = await import('../src/models/index.js');
     const { signAccess } = await import('../src/utils/tokens.js');
 
     const saved = {};
@@ -386,6 +386,7 @@ async function runCallback({ handler, expectMeCall }) {
         findOne: InstagramAccount.findOne,
         findOneAndUpdate: InstagramAccount.findOneAndUpdate,
         creatorFindOne: CreatorProfile.findOne,
+        brandFindOne: BrandProfile.findOne,
         userUpdate: User.findByIdAndUpdate,
     };
 
@@ -393,6 +394,14 @@ async function runCallback({ handler, expectMeCall }) {
     InstagramAccount.findOne = () => ({ select: () => ({ lean: async () => null }) });
     InstagramAccount.findOneAndUpdate = async (_q, doc) => { saved.doc = doc; return doc; };
     CreatorProfile.findOne = async () => null;
+    /*
+      The mirror resolves creator OR brand now (`resolveSocialProfile`), so both
+      models are read. Leaving BrandProfile real meant a live Mongoose query
+      with no database, which buffers rather than rejecting — the handler never
+      redirected and the assertion failed on `new URL(undefined)` instead of on
+      anything this test is about.
+    */
+    BrandProfile.findOne = async () => null;
     User.findByIdAndUpdate = async () => null;
 
     stubFetch(handler);
@@ -424,6 +433,7 @@ async function runCallback({ handler, expectMeCall }) {
         InstagramAccount.findOne = original.findOne;
         InstagramAccount.findOneAndUpdate = original.findOneAndUpdate;
         CreatorProfile.findOne = original.creatorFindOne;
+        BrandProfile.findOne = original.brandFindOne;
         User.findByIdAndUpdate = original.userUpdate;
     }
 }

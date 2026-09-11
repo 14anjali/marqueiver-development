@@ -6,6 +6,7 @@ import { fetchSocialStats } from '../../services/meta.service.js';
 import { getUploadUrl } from '../../services/storage.service.js';
 import { renderMediaKitPdf } from '../../services/mediakit.service.js';
 import { connectedPlatforms } from '../../services/socialConnect.service.js';
+import { brandVerificationLevel } from '../../services/verificationLevel.service.js';
 import { PLATFORMS } from '../../../../shared/types.js';
 /** GET own profile (creator or brand). */
 export const getMyProfile = catchAsync(async (req, res) => {
@@ -15,6 +16,20 @@ export const getMyProfile = catchAsync(async (req, res) => {
         : await CreatorProfile.findOne({ user: sub }).lean();
     if (!profile)
         throw ApiError.notFound('Profile not found');
+
+    /*
+      A brand's Policy 13.1 verification level, derived server-side.
+
+      Computed here rather than in the browser because the Basic tier depends on
+      `User.phoneVerified` / `emailVerified`, which are not on the profile — and
+      because the public profile reports the same level, and two derivations of
+      one policy rule would eventually disagree.
+    */
+    if (role === 'brand') {
+        const user = await User.findById(sub).select('phoneVerified emailVerified').lean();
+        return ok(res, { ...profile, verificationLevel: brandVerificationLevel(profile, user) });
+    }
+
     ok(res, profile);
 });
 /** Creator onboarding (7 steps, proposal §5.1) — partial updates, resumable. */
@@ -83,10 +98,43 @@ export const updateBrandSchema = z.object({
     website: z.string().optional(),
     logo: z.string().optional(),
     contactPerson: z.string().optional(),
-    contactEmail: z.string().email().optional(),
+    // `.or(z.literal(''))` so a brand can clear the field. Without it the only
+    // way to remove a contact email is to leave a wrong one in place — the same
+    // defect the creator schema had.
+    contactEmail: z.string().email().or(z.literal('')).optional(),
     contactPhone: z.string().optional(),
     location: z.object({ city: z.string().optional(), country: z.string().optional() }).optional(),
     teamMembers: z.array(z.object({ name: z.string(), role: z.string() })).optional(),
+
+    /* ── Brand Identity ──────────────────────────────────────────────────── */
+    coverUrl: z.string().max(500).optional(),
+    tagline: z.string().max(160).optional(),
+
+    /* ── Business Information ────────────────────────────────────────────── */
+    categories: z.array(z.string().max(40)).max(15).optional(),
+    businessType: z.string().max(80).optional(),
+    // Checksum-free format check: 2 digits (state), 10-char PAN, 1 entity
+    // digit, 'Z', 1 checksum char. Rejects obvious nonsense without pretending
+    // to validate the checksum, which is the GST portal's job.
+    gstin: z.string().regex(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/, 'That is not a valid GSTIN')
+        .or(z.literal('')).optional(),
+    billing: z.object({
+        legalName: z.string().max(160).optional(),
+        addressLine1: z.string().max(200).optional(),
+        addressLine2: z.string().max(200).optional(),
+        city: z.string().max(80).optional(),
+        state: z.string().max(80).optional(),
+        postalCode: z.string().max(16).optional(),
+        country: z.string().max(80).optional(),
+    }).optional(),
+
+    /* ── Campaign Preferences (descriptive only) ─────────────────────────── */
+    campaignPreferences: z.object({
+        creatorCategories: z.array(z.string().max(40)).max(20).optional(),
+        contentTypes: z.array(z.string().max(40)).max(20).optional(),
+        collaborationTypes: z.array(z.enum(['paid', 'barter'])).optional(),
+        targetAudience: z.string().max(500).optional(),
+    }).optional(),
 });
 export const updateBrandProfile = catchAsync(async (req, res) => {
     if (req.auth.role !== 'brand')
@@ -499,7 +547,29 @@ export const deleteAccount = catchAsync(async (req, res) => {
             $unset: { payoutMethod: 1, socialAccounts: 1, selfReportedMetrics: 1 },
         });
     } else {
-        await BrandProfile.findOneAndUpdate({ user: userId }, { companyName: 'Deleted account', about: '', logoUrl: '' });
+        /*
+          `logo`, not `logoUrl`.
+
+          The field on BrandProfile is `logo`; `logoUrl` is not a path on the
+          schema, so Mongoose's strict mode dropped it silently and a deleted
+          brand's logo stayed live on every campaign it had ever run. The
+          banner and the private business fields are cleared here too — they
+          were never cleared at all, so a deleted account kept its GSTIN and
+          invoicing address.
+        */
+        await BrandProfile.findOneAndUpdate({ user: userId }, {
+            companyName: 'Deleted account',
+            about: '',
+            tagline: '',
+            logo: '',
+            coverUrl: '',
+            website: '',
+            contactPerson: '',
+            contactEmail: '',
+            contactPhone: '',
+            gstin: '',
+            $unset: { billing: 1, socialAccounts: 1 },
+        });
     }
 
     ok(res, { deleted: true });

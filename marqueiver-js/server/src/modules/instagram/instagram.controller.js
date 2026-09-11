@@ -4,7 +4,8 @@ import { ok } from '../../utils/respond.js';
 import { env } from '../../config/env.js';
 import { logger } from '../../config/logger.js';
 import { verifyAccess } from '../../utils/tokens.js';
-import { InstagramAccount, InstagramMedia, CreatorProfile, User } from '../../models/index.js';
+import { InstagramAccount, InstagramMedia, User } from '../../models/index.js';
+import { resolveSocialProfile, pullSocialEntry } from '../../services/socialConnect.service.js';
 import { syncInstagram } from '../../services/socialSync.service.js';
 import * as instagramService from '../../services/instagram.service.js';
 import { describeError, userFacingMessage } from '../../utils/describeError.js';
@@ -118,7 +119,9 @@ async function persistProfile(userId, token, profile) {
   ));
 
   // Step 9b — mirror into the creator profile's socialAccounts.
-  const creator = await step('mirrorToCreatorProfile', () => CreatorProfile.findOne({ user: userId }));
+  // Resolves the creator OR brand profile — the OAuth routes are not
+  // role-gated, and this used to silently do nothing for a brand.
+  const creator = await step('mirrorToSocialProfile', () => resolveSocialProfile(userId));
   if (creator) {
     const entry = {
       platform: 'instagram',
@@ -131,7 +134,7 @@ async function persistProfile(userId, token, profile) {
     const idx = (creator.socialAccounts || []).findIndex((s) => s.platform === 'instagram');
     if (idx >= 0) creator.socialAccounts[idx] = entry;
     else creator.socialAccounts.push(entry);
-    await step('saveCreatorProfile', () => creator.save());
+    await step('saveSocialProfile', () => creator.save());
   }
 
   /**
@@ -451,14 +454,9 @@ export const disconnectInstagram = catchAsync(async (req, res) => {
 
   await InstagramAccount.deleteOne({ user: userId });
 
-  await CreatorProfile.findOneAndUpdate(
-    { user: userId },
-    {
-      $pull: {
-        socialAccounts: { platform: 'instagram' }
-      }
-    }
-  );
+  // Pulls from whichever profile the user has — a brand disconnecting used
+  // to keep a stale follower figure on its profile forever.
+  await pullSocialEntry(userId, 'instagram');
 
   await User.findByIdAndUpdate(
     userId,

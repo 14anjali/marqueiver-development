@@ -3,9 +3,10 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import AppShell from '../components/AppShell';
 import AccountSettings from '../components/profile/AccountSettings';
-import ProfileNav, { SECTIONS } from '../components/profile/ProfileNav';
+import ProfileNav, { SECTIONS, BRAND_SECTIONS } from '../components/profile/ProfileNav';
 import { profileCompleteness } from '../components/profile/completeness';
-import { SectionCard, Field, SaveButton } from '../components/profile/shared';
+import { brandCompleteness } from '../components/profile/brandCompleteness';
+import { SectionCard } from '../components/profile/shared';
 
 import Overview from '../components/profile/sections/Overview';
 import PersonalInfo from '../components/profile/sections/PersonalInfo';
@@ -15,6 +16,15 @@ import WorkPreferences from '../components/profile/sections/WorkPreferences';
 import RateCard from '../components/profile/sections/RateCard';
 import BankPayments from '../components/profile/sections/BankPayments';
 import Verification from '../components/profile/sections/Verification';
+
+import BrandOverview from '../components/profile/brand/BrandOverview';
+import BusinessInformation from '../components/profile/brand/BusinessInformation';
+import BrandIdentity from '../components/profile/brand/BrandIdentity';
+import BrandSocial from '../components/profile/brand/BrandSocial';
+import PreviousWork from '../components/profile/brand/PreviousWork';
+import CampaignPreferences from '../components/profile/brand/CampaignPreferences';
+import PaymentBilling from '../components/profile/brand/PaymentBilling';
+import BrandVerification from '../components/profile/brand/BrandVerification';
 
 import { SkeletonList } from '../components/feedback';
 import { ErrorBlock, useToast } from '../lib/ui-state';
@@ -56,19 +66,20 @@ import { useAuth } from '../lib/auth';
  * straight into the section that would improve it, which only works because of
  * this.
  *
- * ── Brands are untouched ────────────────────────────────────────────────────
+ * ── Two roles, one route, two centres ───────────────────────────────────────
  *
- * This route serves both roles. Everything above is the creator experience;
- * a brand gets the same simple form it had before, because none of the nine
- * sections — rate card, social connections, payouts, work preferences — is a
- * thing a brand profile has. Redesigning that is a separate job with a separate
- * set of fields, and inventing it here would be worse than leaving it alone.
+ * This route serves both. `CreatorAccountCenter` and `BrandAccountCenter` share
+ * the shell — `ProfileNav`, the section frame, the completeness meter, the
+ * `?section=` URL — and nothing else, because the field sets barely overlap. A
+ * creator has a rate card and languages; a brand has a GSTIN and campaign
+ * preferences. One component branching on role through every section would be
+ * harder to read than two that each say what they mean.
  */
 export default function ProfilePage() {
   const { user } = useAuth();
   const isCreator = user?.role === 'creator';
 
-  return isCreator ? <CreatorAccountCenter /> : <BrandProfile />;
+  return isCreator ? <CreatorAccountCenter /> : <BrandAccountCenter />;
 }
 
 /* ═══════════════════════════ creator account centre ══════════════════════════ */
@@ -309,68 +320,109 @@ function QuickLink({ to, icon: Icon, label }) {
   );
 }
 
-/* ═════════════════════════════════ brands ═══════════════════════════════════ */
+/* ════════════════════════════ brand account centre ═══════════════════════════ */
 
 /**
- * The brand profile, unchanged in behaviour.
+ * The Brand Profile and Account Center.
  *
- * Same four fields and the same `PATCH /me/brand` call as before, including the
- * guard that stopped a failed load from letting an empty form overwrite a real
- * profile. The sectioned Account Center above is built around things a brand
- * profile does not have — a rate card, connected creator accounts, payout
- * details, work preferences — so it is not applied here.
+ * Nine sections, and deliberately no Team / Admin Access — the brand profile is
+ * about the business and how it collaborates, not about who at the company can
+ * sign in. `BrandProfile.teamMembers` still exists on the model and is left
+ * alone; it is simply not surfaced here.
+ *
+ * ── Everything goes through the existing APIs ──────────────────────────────
+ *
+ *   Business Information   PATCH /api/users/me/brand
+ *   Brand Identity         PATCH /api/users/me/brand + the presigned upload endpoint
+ *   Social Media           the existing Instagram / Facebook / YouTube OAuth
+ *   Previous Work          GET /api/campaigns and GET /api/deals, read-only
+ *   Campaign Preferences   PATCH /api/users/me/brand
+ *   Payment & Billing      PATCH /api/users/me/brand + GET /api/payments/transactions
+ *   Verification           POST and GET /api/verifications
+ *   Settings               DELETE /api/users/me
+ *
+ * No new endpoint was added for any of it. The backend changes were additive
+ * fields on `BrandProfile`, a projection that stops creators reading a brand's
+ * private business data, and making the social mirror resolve a brand profile
+ * as well as a creator one.
+ *
+ * ── Settings has no visibility toggle ──────────────────────────────────────
+ *
+ * `setProfileVisibility` is creator-only and `BrandProfile` has no
+ * `isPublished` field, so a toggle here would be a control with nothing behind
+ * it. `AccountSettings` already gates that block on `isCreator`, so it renders
+ * deletion alone — which is the real, working functionality.
  */
-function BrandProfile() {
+function BrandAccountCenter() {
+  const [params, setParams] = useSearchParams();
   const reduced = usePrefersReducedMotion();
-  const toast = useToast();
 
   const [profile, setProfile] = useState(null);
-  const [form, setForm] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [nonce, setNonce] = useState(0);
-  const [saving, setSaving] = useState(false);
 
+  const requested = params.get('section');
+  const active = BRAND_SECTIONS.some((s) => s.id === requested) ? requested : 'overview';
+
+  /**
+   * Load the profile.
+   *
+   * `profile` stays null until this succeeds and no section renders without it,
+   * for the same reason as the creator centre: the page this replaces caught
+   * the load error, left the form bound to `{}` and let "Save changes" write
+   * those blanks over a real profile.
+   */
   useEffect(() => {
     let alive = true;
     setLoading(true);
     setError(null);
+
     api.myProfile()
-      .then(({ data }) => {
-        if (!alive) return;
-        setProfile(data ?? {});
-        setForm(data ?? {});
-      })
+      .then(({ data }) => { if (alive) setProfile(data ?? {}); })
       .catch((e) => { if (alive) setError(e); })
       .finally(() => { if (alive) setLoading(false); });
+
     return () => { alive = false; };
   }, [nonce]);
 
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const go = useCallback((section) => {
+    setParams(section === 'overview' ? {} : { section }, { replace: false });
+    window.scrollTo({ top: 0, behavior: reduced ? 'auto' : 'smooth' });
+  }, [setParams, reduced]);
 
-  const dirty = useMemo(
-    () => JSON.stringify(form) !== JSON.stringify(profile),
-    [form, profile],
+  /**
+   * A section saved.
+   *
+   * `PATCH /me/brand` returns the updated document but NOT the derived
+   * `verificationLevel`, which only `GET /me/profile` computes. Carrying the
+   * existing one forward keeps the badge and the outstanding-requirements list
+   * from vanishing after an unrelated save; `refetch` is what recomputes it.
+   */
+  const onSaved = useCallback((next) => {
+    if (!next) return;
+    setProfile((prev) => ({
+      verificationLevel: prev?.verificationLevel,
+      ...next,
+    }));
+  }, []);
+
+  /**
+   * Re-read the profile from the server.
+   *
+   * Used after anything that changes derived state: a social connect or
+   * disconnect (which rewrites `socialAccounts`), and after a verification
+   * submission or a business-detail change that could move the Policy 13.1
+   * level.
+   */
+  const refetch = useCallback(() => setNonce((n) => n + 1), []);
+
+  const completeness = useMemo(
+    () => (profile ? brandCompleteness(profile) : null),
+    [profile],
   );
 
-  async function save() {
-    if (!form || !profile) return;
-    setSaving(true);
-    try {
-      const { data } = await api.updateBrand({
-        companyName: form.companyName,
-        industry: form.industry,
-        about: form.about,
-        website: form.website,
-      });
-      if (data) { setProfile(data); setForm(data); }
-      toast.push('Profile saved', 'success');
-    } catch (e) {
-      toast.push(e.message, 'error');
-    } finally {
-      setSaving(false);
-    }
-  }
+  const current = BRAND_SECTIONS.find((s) => s.id === active);
 
   return (
     <AppShell>
@@ -378,45 +430,125 @@ function BrandProfile() {
         variants={withReducedMotion(page, reduced)}
         initial="hidden"
         animate="visible"
-        className="max-w-[860px] mx-auto px-4 sm:px-6 py-6 sm:py-8"
+        className="max-w-[1180px] mx-auto px-4 sm:px-6 py-6 sm:py-8"
       >
-        <header className="mb-5">
-          <h1 className="font-display font-extrabold text-xl sm:text-2xl text-ink">My profile</h1>
+        <header className="mb-5 sm:mb-6">
+          <h1 className="font-display font-extrabold text-xl sm:text-2xl text-ink">
+            Brand &amp; account
+          </h1>
           <p className="text-muted text-sm mt-1 max-w-prose leading-relaxed">
-            This is what creators see about you.
+            Everything creators see about your brand, and everything only you can see.
           </p>
         </header>
 
         {loading ? (
-          <SkeletonList count={3} label="Loading your profile" />
+          <div className="lg:flex lg:gap-8">
+            <div className="hidden lg:block w-[260px] shrink-0">
+              <SkeletonList count={5} label="Loading your brand profile" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <SkeletonList count={4} label="Loading your brand profile" />
+            </div>
+          </div>
         ) : error ? (
-          <ErrorBlock error={error} onRetry={() => setNonce((n) => n + 1)} />
-        ) : form ? (
-          <div className="space-y-5">
-            <SectionCard
-              title="Company"
-              footer={<SaveButton onClick={save} busy={saving} dirty={dirty} />}
-            >
-              <div className="space-y-5">
-                <Field id="p-company" label="Company name" value={form.companyName}
-                  onChange={(v) => set('companyName', v)} />
-                <Field id="p-industry" label="Industry" value={form.industry}
-                  onChange={(v) => set('industry', v)} />
-                <Field id="p-website" label="Website" type="url" value={form.website}
-                  onChange={(v) => set('website', v)} placeholder="https://" />
-                <Field id="p-about" label="About" textarea value={form.about}
-                  onChange={(v) => set('about', v)} />
-              </div>
-            </SectionCard>
-
-            <AccountSettings
-              profile={profile}
-              isCreator={false}
-              onProfileChange={setProfile}
+          <div className="max-w-2xl">
+            <ErrorBlock error={error} onRetry={refetch} />
+          </div>
+        ) : profile ? (
+          <div className="lg:flex lg:gap-8 lg:items-start">
+            <ProfileNav
+              active={active}
+              onSelect={go}
+              sections={BRAND_SECTIONS}
+              completeness={completeness ? { ...completeness, onFix: go } : null}
             />
+
+            <div className="flex-1 min-w-0 mt-5 lg:mt-0">
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.div
+                  key={active}
+                  initial={reduced ? false : { opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={reduced ? { opacity: 0 } : { opacity: 0, y: -4 }}
+                  transition={{ duration: 0.22, ease: [0.2, 0.7, 0.3, 1] }}
+                >
+                  <h2 className="sr-only">{current?.label}</h2>
+
+                  {active === 'overview' && <BrandOverview profile={profile} onEdit={go} />}
+
+                  {active === 'business' && (
+                    // A business change can move the verification level, so the
+                    // save is followed by a re-read rather than a local merge.
+                    <BusinessInformation
+                      profile={profile}
+                      onSaved={(next) => { onSaved(next); refetch(); }}
+                    />
+                  )}
+
+                  {active === 'identity' && (
+                    <BrandIdentity profile={profile} onSaved={onSaved} />
+                  )}
+
+                  {active === 'social' && <BrandSocial onChanged={refetch} />}
+
+                  {active === 'work' && <PreviousWork profile={profile} />}
+
+                  {active === 'preferences' && (
+                    <CampaignPreferences profile={profile} onSaved={onSaved} />
+                  )}
+
+                  {active === 'billing' && (
+                    <PaymentBilling
+                      profile={profile}
+                      onSaved={(next) => { onSaved(next); refetch(); }}
+                    />
+                  )}
+
+                  {active === 'verification' && (
+                    <BrandVerification profile={profile} onEdit={go} />
+                  )}
+
+                  {active === 'settings' && (
+                    <BrandSettings profile={profile} onProfileChange={setProfile} />
+                  )}
+                </motion.div>
+              </AnimatePresence>
+            </div>
           </div>
         ) : null}
       </motion.div>
     </AppShell>
+  );
+}
+
+/**
+ * Brand settings.
+ *
+ * Account deletion, through the existing flow — including the part that refuses
+ * while collaborations are in progress, so a creator is never left with a deal
+ * against a closed account.
+ *
+ * No visibility toggle: see the note on `BrandAccountCenter`.
+ */
+function BrandSettings({ profile, onProfileChange }) {
+  return (
+    <div className="space-y-5">
+      <SectionCard
+        title="Your campaigns and collaborations"
+        description="Account settings live here; the day-to-day work has its own screens."
+      >
+        <div className="grid grid-cols-3 gap-3">
+          <QuickLink to="/campaigns" icon={FileText} label="Campaigns" />
+          <QuickLink to="/creators" icon={ImageIcon} label="Find creators" />
+          <QuickLink to="/deals" icon={BarChart} label="Deals" />
+        </div>
+      </SectionCard>
+
+      <AccountSettings
+        profile={profile}
+        isCreator={false}
+        onProfileChange={onProfileChange}
+      />
+    </div>
   );
 }

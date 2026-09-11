@@ -83,12 +83,32 @@ export const SECTIONS = [
   },
 ];
 
-export default function ProfileNav({ active, onSelect, completeness }) {
+/**
+ * The brand sidebar.
+ *
+ * Nine entries, and deliberately no Team / Admin Access — the brand profile is
+ * about the business and how it collaborates, not about who at the company can
+ * sign in. `BrandProfile.teamMembers` still exists on the model and is
+ * untouched; it is simply not surfaced here.
+ */
+export const BRAND_SECTIONS = [
+  { id: 'overview', label: 'Overview', icon: Grid, blurb: 'Everything creators see' },
+  { id: 'business', label: 'Business Information', icon: FileText, blurb: 'Company, contact, GSTIN', },
+  { id: 'identity', label: 'Brand Identity', icon: ImageIcon, blurb: 'Logo, banner, tagline' },
+  { id: 'social', label: 'Social Media', icon: Check, blurb: 'Instagram, Facebook, YouTube' },
+  { id: 'work', label: 'Portfolio / Previous Work', icon: Users, blurb: 'Campaigns and collaborations' },
+  { id: 'preferences', label: 'Campaign Preferences', icon: Sliders, blurb: 'What you look for' },
+  { id: 'billing', label: 'Payment & Billing', icon: Wallet, blurb: 'Invoicing and history', private: true },
+  { id: 'verification', label: 'Verification', icon: ShieldCheck, blurb: 'Your verified badge', private: true },
+  { id: 'settings', label: 'Settings', icon: Lock, blurb: 'Your account' },
+];
+
+export default function ProfileNav({ active, onSelect, completeness, sections = SECTIONS }) {
   const [open, setOpen] = useState(false);
   const reduced = usePrefersReducedMotion();
   const sheetRef = useRef(null);
 
-  const current = SECTIONS.find((s) => s.id === active) ?? SECTIONS[0];
+  const current = sections.find((s) => s.id === active) ?? sections[0];
 
   // A section change closes the sheet; leaving it open over the new content is
   // how a phone menu ends up needing two taps to dismiss.
@@ -155,7 +175,7 @@ export default function ProfileNav({ active, onSelect, completeness }) {
                 transition={{ duration: 0.26, ease: [0.2, 0.7, 0.3, 1] }}
               >
                 <span className="block w-10 h-1 rounded-full bg-line mx-auto mb-3" aria-hidden="true" />
-                {SECTIONS.map((s) => (
+                {sections.map((s) => (
                   <NavItem
                     key={s.id}
                     section={s}
@@ -175,7 +195,7 @@ export default function ProfileNav({ active, onSelect, completeness }) {
         className="hidden lg:block sticky top-6 self-start w-[260px] shrink-0"
       >
         <div className="rounded-xl3 border border-line bg-white shadow-flat p-2.5">
-          {SECTIONS.map((s) => (
+          {sections.map((s) => (
             <NavItem key={s.id} section={s} active={s.id === active} onSelect={onSelect} />
           ))}
         </div>

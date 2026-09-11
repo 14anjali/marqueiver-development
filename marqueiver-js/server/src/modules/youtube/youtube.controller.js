@@ -3,7 +3,8 @@ import { assertNotLinkedElsewhere } from '../../services/socialConnect.service.j
 import { ok } from '../../utils/respond.js';
 import { env } from '../../config/env.js';
 import { verifyAccess } from '../../utils/tokens.js';
-import { YouTubeChannel, CreatorProfile, User } from '../../models/index.js';
+import { YouTubeChannel, User } from '../../models/index.js';
+import { resolveSocialProfile, pullSocialEntry } from '../../services/socialConnect.service.js';
 import * as youtubeService from '../../services/youtube.service.js';
 
 /**
@@ -48,7 +49,8 @@ async function persistProfile(userId, token, profile) {
   );
 
   // Mirror into creator profile's socialAccounts
-  const creator = await CreatorProfile.findOne({ user: userId });
+  // Creator OR brand: the mirror previously found nothing for a brand.
+  const creator = await resolveSocialProfile(userId);
   if (creator) {
     const entry = {
       platform: 'youtube',
@@ -186,10 +188,9 @@ export const disconnectYoutube = catchAsync(async (req, res) => {
 
   await YouTubeChannel.deleteOne({ user: userId });
 
-  await CreatorProfile.findOneAndUpdate(
-    { user: userId },
-    { $pull: { socialAccounts: { platform: 'youtube' } } },
-  );
+  // Pulls from whichever profile the user has — a brand disconnecting used
+  // to keep a stale follower figure on its profile forever.
+  await pullSocialEntry(userId, 'youtube');
 
   await User.findByIdAndUpdate(
     userId,
