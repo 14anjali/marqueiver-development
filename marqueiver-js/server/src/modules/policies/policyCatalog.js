@@ -3,11 +3,11 @@ import { createRequire } from 'node:module';
 /**
  * The Marqueiver Platform Policies (V2), effective 01 August 2026.
  *
- * `content/policies.v2.json` is generated from the authoritative DOCX — it is
- * the real policy text, not a summary and not placeholder copy. It is checked in
- * rather than read from the document at runtime so that (a) the server has no
- * dependency on a Word file, and (b) re-issuing the policy produces a reviewable
- * diff. Regenerate it, never hand-edit it.
+ * `src/config/content/policies.v2.json` is generated from the authoritative
+ * DOCX — it is the real policy text, not a summary and not placeholder copy. It
+ * is checked in rather than read from the document at runtime so that (a) the
+ * server has no dependency on a Word file, and (b) re-issuing the policy
+ * produces a reviewable diff. Regenerate it, never hand-edit it.
  *
  * Two things this module owns that the DOCX does not express:
  *
@@ -21,8 +21,20 @@ import { createRequire } from 'node:module';
  */
 
 const require = createRequire(import.meta.url);
-/** @type {Array<import('./policyTypes.js').PolicyDocument>} */
-export const POLICY_V2 = require('../../content/policies.v2.json');
+/**
+ * Resolved from this file: `src/modules/policies/` + `../../config/content/`
+ * lands on `src/config/content/policies.v2.json`, which is where the file
+ * actually lives.
+ *
+ * It previously read `../../content/`, resolving to `src/content/` — a
+ * directory that does not exist. Locally that can go unnoticed on a
+ * case-insensitive or stale checkout; on Linux it is a hard
+ * MODULE_NOT_FOUND, and because this module is loaded during startup the
+ * server exits before binding a port rather than failing a single request.
+ *
+ * @type {Array<import('./policyTypes.js').PolicyDocument>}
+ */
+export const POLICY_V2 = require('../../config/content/policies.v2.json');
 
 export const POLICY_VERSION = '2.0';
 
