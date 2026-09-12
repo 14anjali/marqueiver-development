@@ -8,6 +8,9 @@ import SubmitWorkDialog from '../components/deals/SubmitWorkDialog';
 import AdditionalTermsPanel from '../components/deals/AdditionalTermsPanel';
 import FinalTerms from '../components/deals/FinalTerms';
 import ChangeRequestPanel from '../components/deals/ChangeRequestPanel';
+import AdvancePayment from '../components/deals/AdvancePayment';
+import DealChat from '../components/deals/DealChat';
+import { MESSAGING_ALLOWED_STATES, MESSAGING_LOCK_REASON } from '../components/deals/messagingLock';
 import { Modal } from '../components/overlay';
 import { StatusPill, Money, Steps, Progress, SkeletonCard, SuccessMark } from '../components/feedback';
 import { ChevLeft, Clock, Send, Star, Check } from '../components/icons';
@@ -105,8 +108,6 @@ export default function DealDetailPage() {
   const [busy, setBusy] = useState('');
   const [showCancel, setShowCancel] = useState(false);
   const [showSubmit, setShowSubmit] = useState(false);
-  const [messages, setMessages] = useState([]);
-  const [msg, setMsg] = useState('');
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewHover, setReviewHover] = useState(0);
   const [reviewText, setReviewText] = useState('');
@@ -126,6 +127,9 @@ export default function DealDetailPage() {
   const [terms, setTerms] = useState(null);
   const [requestingChange, setRequestingChange] = useState(false);
 
+  /** Proposal versions, so a message can point at one. */
+  const [negotiationOffers, setNegotiationOffers] = useState([]);
+
   /** At most one request is ever open — the server refuses a second. */
   const pendingChange = (terms?.changeRequests ?? []).find((c) => c.status === 'pending') ?? null;
 
@@ -142,7 +146,9 @@ export default function DealDetailPage() {
       const { data } = await api.getDeal(id);
       setDeal(data);
       loadTerms();
-      try { const m = await api.listMessages(id); setMessages(m.data || []); } catch { /* chat may be locked */ }
+      api.getNegotiation(id)
+        .then((n) => setNegotiationOffers(n.data?.offers ?? []))
+        .catch(() => setNegotiationOffers([]));
     } catch (e) { setError(e); } finally { setLoading(false); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
@@ -169,12 +175,6 @@ export default function DealDetailPage() {
     finally { setBusy(''); }
   }
 
-  async function send() {
-    if (!msg.trim()) return;
-    const text = msg; setMsg('');
-    try { const { data } = await api.sendMessage(id, text); setMessages((m) => [...m, data]); }
-    catch (e) { setMsg((cur) => cur || text); toast.push(e.message, 'error'); }
-  }
 
   async function submitReview() {
     if (!reviewRating) return;
@@ -220,7 +220,20 @@ export default function DealDetailPage() {
   const released = Boolean(deal.escrow?.releasedAt);
   const revisionsUsed = deal.revisionCount ?? 0;
   const revisionsAllowed = deal.terms?.revisionsAllowed ?? 3;
-  const chatLocked = ['invitation', 'negotiation', 'accepted', 'escrow_pending'].includes(deal.state);
+  /**
+   * The same gate the server enforces, and the same reasons.
+   *
+   * `messaging.policy.js` owns both; this mirrors it so the page can explain
+   * the lock rather than showing one sentence for four different states. The
+   * server is still the authority — calling the API directly is refused there.
+   */
+  /** The advance panel owns the money story in the states it covers. */
+  const showAdvancePanel = Boolean(terms?.locked)
+    && ['accepted', 'escrow_pending', 'in_progress'].includes(deal.state);
+
+  const chatLocked = !MESSAGING_ALLOWED_STATES.includes(deal.state);
+  const chatLockReason = MESSAGING_LOCK_REASON[deal.state]
+    ?? 'Messaging is not available for this collaboration yet.';
 
   return (
     <AppShell>
@@ -494,6 +507,17 @@ export default function DealDetailPage() {
 
           {/* ── right column ─────────────────────────────────────────── */}
           <div className="space-y-4">
+            {/*
+              Shown only when the advance panel is not.
+
+              While both rendered, the page stacked two money boxes telling the
+              same story — and this one led with "Amount ₹62,000" when what the
+              brand owed right now was ₹31,000. `AdvancePayment` carries the
+              whole schedule, the live payment state and the retry; this stays
+              for the states it does not cover, where the question really is
+              just "is the money held".
+            */}
+            {!showAdvancePanel && (
             <motion.section variants={withReducedMotion(rise, reduced)} className="panel-money">
               <h2 className="font-display font-bold text-money-700 text-sm mb-3">Escrow</h2>
               <div className="flex justify-between items-baseline py-1.5">
@@ -520,47 +544,25 @@ export default function DealDetailPage() {
                     : 'Work starts once the advance is confirmed by the payment partner.'}
               </p>
             </motion.section>
+            )}
 
-            <motion.section variants={withReducedMotion(rise, reduced)} className="card p-5 flex flex-col h-[26rem]">
-              <h2 className="font-display font-bold text-ink text-sm mb-3">Messages</h2>
-              {chatLocked ? (
-                <div className="flex-1 grid place-items-center text-center px-4">
-                  <p className="text-sm text-muted leading-relaxed">
-                    Chat opens once the advance payment is confirmed. Until then,
-                    terms are exchanged as offers so both sides keep a record.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <div className="flex-1 overflow-y-auto space-y-2 no-scrollbar">
-                    {!messages.length ? (
-                      <p className="text-xs text-muted text-center py-6">No messages yet.</p>
-                    ) : messages.map((m, i) => (
-                      <div
-                        key={m._id ?? i}
-                        className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm leading-relaxed ${
-                          m.senderRole === role ? 'ml-auto bg-brand-600 text-white' : 'bg-bg text-ink'}`}
-                      >
-                        {m.body}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex gap-2 mt-3">
-                    <input
-                      value={msg}
-                      onChange={(e) => setMsg(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && send()}
-                      placeholder="Type a message…"
-                      aria-label="Message"
-                      className="field flex-1"
-                    />
-                    <button onClick={send} disabled={!msg.trim()} className="btn-brand px-3.5" aria-label="Send">
-                      <Send className="w-4 h-4" />
-                    </button>
-                  </div>
-                </>
-              )}
-            </motion.section>
+            {/* The one step between agreed terms and work starting. */}
+            {showAdvancePanel && (
+              <motion.div variants={withReducedMotion(rise, reduced)}>
+                <AdvancePayment deal={deal} role={role} onUpdated={(d) => (d ? setDeal(d) : load())} />
+              </motion.div>
+            )}
+
+            <motion.div variants={withReducedMotion(rise, reduced)}>
+              <DealChat
+                deal={deal}
+                role={role}
+                locked={chatLocked}
+                lockReason={chatLockReason}
+                offers={negotiationOffers}
+                terms={terms}
+              />
+            </motion.div>
           </div>
         </motion.div>
       </motion.div>

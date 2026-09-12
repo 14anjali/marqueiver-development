@@ -1,5 +1,6 @@
 import mongoose, { Types } from 'mongoose';
 import { Deal, Transaction, Wallet, Payout, CommissionRecord } from '../../models/index.js';
+import { isVerified } from '../../models/Transaction.js';
 import { transactionsSupported } from '../../config/db.js';
 import { canTransition, isTerminal } from './dealStateMachine.js';
 import {
@@ -209,13 +210,48 @@ async function runMoneyTransition(deal, params) {
                 .session(session ?? undefined);
             if (!txn)
                 throw ApiError.unprocessable('No funding transaction for this deal');
-            if (txn.status !== 'success')
+            /*
+              `isVerified` rather than `=== 'success'`: the state is now
+              `verified`, and `success` is the legacy spelling of the same fact.
+              A comparison that knows only one of them reports a paid
+              collaboration as unpaid.
+            */
+            if (!isVerified(txn))
                 throw ApiError.unprocessable('Funding transaction is not confirmed by the gateway');
 
+            /**
+             * ── The advance is a tranche, not the whole escrow ──────────────
+             *
+             * This wrote `deal.escrow.amount = txn.amount`. Once the advance
+             * became half the value, that would have overwritten the agreed
+             * total with half of it — and `release_escrow` pays out
+             * `deal.escrow.amount`, so the creator would have been paid the
+             * advance and the rest would have vanished from the record.
+             *
+             * The total is set at acceptance from the frozen schedule and is
+             * not touched here. What this records is that the advance tranche
+             * arrived.
+             */
+            deal.escrow.schedule = deal.escrow.schedule ?? {};
+            deal.escrow.schedule.advance = {
+                ...(deal.escrow.schedule.advance?.toObject?.() ?? deal.escrow.schedule.advance ?? {}),
+                funded: true,
+                fundedAt: new Date(),
+                transactionRef: txn._id,
+            };
+
+            /*
+              `escrow.funded` means "the collaboration is funded enough to
+              start", which under the 50/50 schedule is the advance. The balance
+              is a separate tranche and is not part of this gate.
+            */
             deal.escrow.funded = true;
-            deal.escrow.amount = txn.amount;
             deal.escrow.fundedAt = new Date();
             deal.escrow.transactionRef = txn._id;
+
+            // A previous failure is resolved by a payment that went through.
+            deal.escrow.lastFailure = undefined;
+            deal.escrow.needsAdminReview = false;
         }
 
         /**
@@ -236,6 +272,34 @@ async function runMoneyTransition(deal, params) {
         if (effect === 'release_escrow') {
             if (!deal.escrow.funded)
                 throw ApiError.unprocessable('Escrow was never funded');
+
+            /**
+             * ── Release cannot pay out money that was never collected ───────
+             *
+             * `creatorShare: deal.escrow.amount` is the full collaboration
+             * value, and under the 50/50 schedule only the advance has been
+             * charged. Releasing the full value against a half-funded escrow
+             * would credit the creator's wallet with money the platform never
+             * received.
+             *
+             * Charging the balance is deliberately not built yet, so this
+             * refuses rather than guessing. It refuses ONLY for deals that
+             * actually have a schedule with an unfunded balance — deals agreed
+             * before the split, whose single payment was the whole value, are
+             * unaffected and complete exactly as before.
+             *
+             * This is the guard, not the feature: the balance charge is the
+             * next piece of work, and until it exists a 50/50 collaboration
+             * stops here rather than paying out of thin air.
+             */
+            const sched = deal.escrow.schedule;
+            const balanceOwed = sched?.balance?.amount > 0 && !sched.balance.funded;
+            if (balanceOwed) {
+                throw ApiError.unprocessable(
+                    'The remaining 50% has not been paid into escrow, so it cannot be released. '
+                    + 'Collecting the balance payment is not available yet.',
+                );
+            }
 
             await settleRelease(deal, {
                 creatorShare: deal.escrow.amount,
@@ -384,30 +448,111 @@ export async function createPaymentSession(dealId, actorId) {
     if (deal.state !== 'accepted' && deal.state !== 'escrow_pending')
         throw ApiError.unprocessable('Both parties must confirm terms before escrow can be funded');
 
+    /**
+     * ── What is actually charged ───────────────────────────────────────────
+     *
+     * The advance, not the whole collaboration value. This used to raise an
+     * order for `deal.terms.amount` while the confirmed requirement — quoted in
+     * `modules/messaging/messaging.policy.js`, and the thing the chat gate is
+     * built on — says "the required 50% escrow payment". The policy documents
+     * and the payment path disagreed, and the payment path was what ran.
+     *
+     * The figure is read from the schedule frozen at acceptance rather than
+     * recomputed, for the same reason the commission rate is snapshotted
+     * (Policy 14.7/14.8): what both parties saw when they agreed is what
+     * applies. The fallback to the full amount covers deals that were agreed
+     * before the schedule existed — for them the full value *was* the advance.
+     */
+    const advance = deal.escrow?.schedule?.advance?.amount;
+    const amount = advance > 0 ? advance : deal.terms.amount;
+
+    if (deal.escrow?.schedule?.advance?.funded)
+        throw ApiError.unprocessable('The advance for this collaboration is already paid');
+
     const idempotencyKey = `fund_${deal.id}`;
-    // A still-open session from a moment ago (e.g. a page refresh) can be
-    // handed back as-is — its paymentSessionId is cached in `meta` so no
-    // extra Cashfree call is needed. Anything older is superseded rather
-    // than reused, since a stale/expired session id would fail at checkout.
-    const existing = await Transaction.findOne({ idempotencyKey, status: 'pending' });
-    if (existing && existing.meta?.paymentSessionId && Date.now() - existing.createdAt.getTime() < 15 * 60 * 1000) {
-        return { paymentSessionId: existing.meta.paymentSessionId, orderRef: existing.gatewayRef, gateway: existing.gateway };
+    /*
+      A still-open session from a moment ago (e.g. a page refresh) can be handed
+      back as-is — its paymentSessionId is cached in `meta` so no extra Cashfree
+      call is needed. `initiated` counts as still-open: the brand opened
+      checkout and came back, and raising a second order would leave two live
+      ones against the same collaboration.
+
+      A `failed` row is never reused and never deleted — it is the record of the
+      attempt, and the retry path below supersedes it with a fresh order.
+    */
+    const existing = await Transaction.findOne({
+        idempotencyKey,
+        status: { $in: ['pending', 'initiated'] },
+    });
+    if (existing && existing.meta?.paymentSessionId
+        && existing.amount === amount
+        && Date.now() - existing.createdAt.getTime() < 15 * 60 * 1000) {
+        return {
+            paymentSessionId: existing.meta.paymentSessionId,
+            orderRef: existing.gatewayRef,
+            gateway: existing.gateway,
+            amount: existing.amount,
+            status: existing.status,
+        };
     }
     if (existing) await Transaction.deleteOne({ _id: existing._id });
 
-    const order = await cashfree.createEscrowOrder(deal.id, deal.terms.amount);
-    await Transaction.create({
+    /**
+     * The idempotency key carries an attempt number, so a retry after a failure
+     * gets its own order rather than colliding with the failed one. Without it
+     * Cashfree would see a duplicate order id and the brand could never pay.
+     */
+    const attempt = await Transaction.countDocuments({ deal: deal._id, type: 'escrow_fund', tranche: 'advance' });
+    const orderKey = attempt > 0 ? `${deal.id}_a${attempt + 1}` : deal.id;
+
+    const order = await cashfree.createEscrowOrder(orderKey, amount);
+    const txn = new Transaction({
         deal: deal._id,
         fromUser: deal.brand,
         type: 'escrow_fund',
-        status: 'pending',
-        amount: deal.terms.amount,
+        tranche: 'advance',
+        amount,
         gateway: order.gateway,
         gatewayRef: order.orderRef,
         idempotencyKey,
-        meta: { paymentSessionId: order.paymentSessionId },
+        meta: { paymentSessionId: order.paymentSessionId, attempt: attempt + 1 },
     });
-    return { paymentSessionId: order.paymentSessionId, orderRef: order.orderRef, gateway: order.gateway };
+    txn.moveTo('pending', { by: 'brand', note: attempt > 0 ? `Retry ${attempt + 1}` : 'Advance payment created' });
+    await txn.save();
+
+    return {
+        paymentSessionId: order.paymentSessionId,
+        orderRef: order.orderRef,
+        gateway: order.gateway,
+        amount,
+        status: 'pending',
+    };
+}
+
+/**
+ * The brand has opened checkout.
+ *
+ * Reported by the client, and therefore trusted for nothing: it moves the row
+ * from `pending` to `initiated` so both parties can see a payment is under way,
+ * and that is all it does. Only the signature-verified webhook writes
+ * `verified`, and only `verified` unlocks anything.
+ */
+export async function markPaymentInitiated(dealId, actorId) {
+    const deal = await Deal.findById(dealId).select('brand').lean();
+    if (!deal) throw ApiError.notFound('Deal not found');
+    if (deal.brand.toString() !== actorId) throw ApiError.forbidden('Not a party to this deal');
+
+    const txn = await Transaction.findOne({ idempotencyKey: `fund_${dealId}`, status: 'pending' });
+    if (!txn) return null;
+
+    txn.moveTo('initiated', { by: 'brand', note: 'Checkout opened' });
+    await txn.save();
+    return txn;
+}
+
+/** The payment record for a collaboration: every attempt, with its history. */
+export async function paymentRecords(dealId) {
+    return Transaction.find({ deal: dealId }).sort({ createdAt: 1 }).lean();
 }
 
 /** List deals for a user with a single batched query (proposal §4.1 — no fan-out). */
@@ -449,18 +594,59 @@ export async function confirmEscrowFunded(dealId) {
  * the deal exactly where it is: no automatic retry, no automatic cancellation.
  * The case goes to Admin, who decides what happens next.
  */
+/**
+ * How many failed attempts before a human looks at it.
+ *
+ * A declined card is an ordinary thing the brand fixes themselves, so raising
+ * an admin review on the first failure would fill the queue with cases nobody
+ * needs to touch — and tell the brand to wait when what they should do is try a
+ * different card. Repeated failures are a different signal.
+ *
+ * A11's "no automatic retry" is untouched: nothing here retries by itself. The
+ * brand asks for a new payment session, which is a person deciding to try again.
+ */
+const FAILURES_BEFORE_ADMIN_REVIEW = 3;
+
 export async function flagEscrowFailure(dealId, reason) {
     const deal = await Deal.findById(dealId);
     if (!deal) return null;
+
+    const failures = await Transaction.countDocuments({
+        deal: deal._id, type: 'escrow_fund', status: 'failed',
+    });
+    const needsAdmin = failures >= FAILURES_BEFORE_ADMIN_REVIEW;
+
     deal.escrow.lastFailure = { reason: reason ?? 'Payment failed', at: new Date() };
-    deal.escrow.needsAdminReview = true;
+    deal.escrow.needsAdminReview = needsAdmin;
     await deal.save();
 
+    /*
+      The collaboration does not move. It stays exactly where it was —
+      `escrow_pending`, chat still locked — which is what "keep it paused" means
+      here: a failed payment changes nothing except the record of the attempt.
+    */
     await notify({
         user: deal.brand.toString(),
         type: 'deal.escrow_failed',
-        title: 'Escrow payment failed',
-        body: `The payment for "${deal.title}" did not go through. Our team is reviewing it — no action is needed from you yet.`,
+        title: 'Advance payment failed',
+        body: needsAdmin
+            ? `The payment for "${deal.title}" has failed ${failures} times. Our team is looking at it — `
+              + 'you can still try again from the collaboration.'
+            : `The payment for "${deal.title}" did not go through, so the collaboration has not started. `
+              + 'You can try again from the collaboration.',
+        data: dealPayload(deal),
+    }).catch(() => void 0);
+
+    /*
+      The creator is told too. They were waiting for work to start and it has
+      not — leaving them to wonder is how a collaboration quietly dies.
+    */
+    await notify({
+        user: deal.creator.toString(),
+        type: 'deal.escrow_failed',
+        title: 'Waiting on the advance payment',
+        body: `The advance for "${deal.title}" has not gone through yet, so the collaboration has not started. `
+            + 'The brand has been asked to try again.',
         data: dealPayload(deal),
     }).catch(() => void 0);
 

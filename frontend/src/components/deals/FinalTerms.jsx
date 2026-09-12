@@ -150,13 +150,15 @@ export default function FinalTerms({
           </div>
 
           {/*
-            Said plainly. The schedule is agreed and stored, but the payment path
-            still raises one order for the full amount — implying two charges
-            already happen would be a claim about money that is not yet true.
+            Half of this is now true and half is not, and the copy says which.
+            The advance is charged for real — `createPaymentSession` raises an
+            order for `escrow.schedule.advance.amount`. Collecting the balance
+            is not built, so a collaboration cannot complete yet, and claiming
+            otherwise would be a promise about money nobody can keep.
           */}
           <p className="text-[11px] text-money-800/80 mt-3 leading-relaxed">
-            This is the agreed schedule. Escrow currently collects the full amount in one
-            payment; splitting the charge into two is not switched on yet.
+            The advance is collected before work starts. Collecting the remaining 50% is
+            not switched on yet, so a collaboration cannot be closed out until it is.
           </p>
         </div>
 

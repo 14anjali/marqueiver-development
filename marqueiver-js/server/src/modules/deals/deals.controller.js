@@ -4,7 +4,10 @@ import { catchAsync, ApiError } from '../../utils/apiError.js';
 import { ok, created } from '../../utils/respond.js';
 import { Deal, User, CreatorProfile, Offer } from '../../models/index.js';
 import { INCLUDED_REVISIONS } from '../../models/Deal.js';
-import { transitionDeal, listDealsForUser, createPaymentSession } from './deals.service.js';
+import {
+    transitionDeal, listDealsForUser, createPaymentSession,
+    markPaymentInitiated, paymentRecords,
+} from './deals.service.js';
 import { canRequestRevision, canCancel, REVIEW_WINDOW_DAYS, RESOLUTION_AUTO_DAYS } from './dealStateMachine.js';
 import { brandCancellationOutcome, creatorCancellationOutcome } from '../../services/commission.service.js';
 import * as additionalTerms from './additionalTerms.service.js';
@@ -725,4 +728,32 @@ export const getTermsHistory = catchAsync(async (req, res) => {
     if (!isParty && req.auth.role !== 'admin') throw ApiError.forbidden();
 
     ok(res, changeRequest_history(deal));
+});
+
+/* ── Payment records and state ─────────────────────────────────────────────
+ *
+ * The ledger for one collaboration. Both parties may read it: a creator waiting
+ * to start needs to see whether the advance is pending, failed or verified, and
+ * "ask the brand" is not an answer a platform should give.
+ */
+export const listDealPayments = catchAsync(async (req, res) => {
+    const deal = await Deal.findById(req.params.id).select('brand creator').lean();
+    if (!deal) throw ApiError.notFound('Collaboration not found');
+
+    const isParty = [deal.brand.toString(), deal.creator.toString()].includes(req.auth.sub);
+    if (!isParty && req.auth.role !== 'admin') throw ApiError.forbidden();
+
+    ok(res, await paymentRecords(req.params.id));
+});
+
+/**
+ * The brand opened checkout.
+ *
+ * Client-reported, and therefore trusted for nothing beyond showing both
+ * parties that a payment is under way. It cannot verify anything — only the
+ * signature-verified webhook writes `verified`.
+ */
+export const paymentInitiated = catchAsync(async (req, res) => {
+    const txn = await markPaymentInitiated(req.params.id, req.auth.sub);
+    ok(res, txn);
 });

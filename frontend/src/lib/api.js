@@ -407,6 +407,14 @@ export const api = {
   deleteAccount: (reason) => req('/api/users/me', { method: 'DELETE', body: { confirm: 'DELETE', reason } }),
 
   // Structured negotiation (scope §11/§12) — offers are versioned records.
+  /** Chat attachments, through the same signed-upload endpoint everything else uses. */
+  messageUploadUrl: (fileName, contentType) =>
+    req('/api/users/me/logo-upload-url', { method: 'POST', body: { fileName, contentType, purpose: 'message' } }),
+
+  /** Every payment attempt on a collaboration, with its state history. */
+  paymentRecords: (dealId) => req(`/api/deals/${dealId}/payments`),
+  markPaymentInitiated: (dealId) => req(`/api/deals/${dealId}/payment-initiated`, { method: 'POST' }),
+
   /** The agreement, the terms in force now, and every change asked for. */
   termsHistory: (dealId) => req(`/api/deals/${dealId}/terms-history`),
   proposeChangeRequest: (dealId, changes, reason) =>
@@ -428,7 +436,14 @@ export const api = {
   listMessages: (dealId) => req(`/api/messages/${dealId}`),
   listMessageThreads: () => req('/api/messages/threads'),
   markMessagesRead: (dealId) => req(`/api/messages/${dealId}/read`, { method: 'POST' }),
-  sendMessage: (dealId, body) => req(`/api/messages/${dealId}`, { method: 'POST', body: { body } }),
+  /**
+   * A message: text, attachments, references — at least one of them.
+   * Accepts a plain string for the many existing callers that send only text.
+   */
+  sendMessage: (dealId, message) => req(`/api/messages/${dealId}`, {
+    method: 'POST',
+    body: typeof message === 'string' ? { body: message } : message,
+  }),
 
   transactions: () => req('/api/payments/transactions'),
   earnings: () => req('/api/payments/earnings'),

@@ -4,6 +4,7 @@ import { ok, created } from '../../utils/respond.js';
 import { Deal, Message, BrandProfile, CreatorProfile } from '../../models/index.js';
 import { emitToDeal } from './messaging.gateway.js';
 import { MESSAGING_ALLOWED_STATES } from './messaging.policy.js';
+import { MESSAGE_REFERENCE_KINDS, toAttachment } from '../../models/Message.js';
 
 /**
  * Party check + state check. Enforced on every messaging route, so calling the
@@ -33,7 +34,34 @@ export const listMessages = catchAsync(async (req, res) => {
     const messages = await Message.find({ deal: req.params.dealId }).sort({ createdAt: 1 }).limit(200).lean();
     ok(res, messages);
 });
-export const sendSchema = z.object({ body: z.string().min(1), attachments: z.array(z.string()).optional() });
+/**
+ * A message: text, attachments, references — at least one of them.
+ *
+ * `body` was `min(1)`, so an image could not be sent on its own and the sender
+ * had to type something next to it. `.refine` below states the real rule.
+ *
+ * Attachments arrive as objects rather than bare URLs so an image can render as
+ * an image and a file as a named chip. `contentType` comes from the sender's
+ * own file, which is also what the signed-upload endpoint was given.
+ */
+export const sendSchema = z.object({
+    body: z.string().max(4000).default(''),
+    attachments: z.array(z.object({
+        url: z.string().url(),
+        name: z.string().max(200).optional(),
+        contentType: z.string().max(120).optional(),
+        size: z.number().int().min(0).optional(),
+    })).max(10).optional(),
+    references: z.array(z.object({
+        kind: z.enum(MESSAGE_REFERENCE_KINDS),
+        ref: z.string().optional(),
+        seq: z.number().int().min(1).optional(),
+        label: z.string().max(200).optional(),
+    })).max(5).optional(),
+}).strict().refine(
+    (m) => Boolean(m.body?.trim()) || m.attachments?.length || m.references?.length,
+    { message: 'A message needs text, an attachment or a reference' },
+);
 export const sendMessage = catchAsync(async (req, res) => {
     await assertParty(req.params.dealId, req.auth.sub, req.auth.role);
     const b = req.body;
@@ -41,8 +69,11 @@ export const sendMessage = catchAsync(async (req, res) => {
         deal: req.params.dealId,
         sender: req.auth.sub,
         senderRole: req.auth.role,
-        body: b.body,
-        attachments: b.attachments ?? [],
+        body: b.body ?? '',
+        // `toAttachment` decides image-vs-file from the content type, in one
+        // place, rather than each renderer guessing from the URL.
+        attachments: (b.attachments ?? []).map(toAttachment),
+        references: b.references ?? [],
         readBy: [req.auth.sub],
     });
     emitToDeal(req.params.dealId, 'message:new', msg); // realtime fan-out

@@ -53,11 +53,17 @@ export const webhook = catchAsync(async (req, res) => {
      * and the money. Now the processor's confirmation is the trigger.
      */
     if (orderId && type === 'PAYMENT_SUCCESS_WEBHOOK') {
-        const txn = await Transaction.findOneAndUpdate(
-            { gatewayRef: orderId },
-            { status: 'success' },
-            { new: true },
-        );
+        /*
+          `verified`, not `success`. The gateway confirming a payment is the
+          only thing that writes this state, and it is the only state that
+          unlocks the collaboration or the chat. `moveTo` records it in the
+          payment's own history so the record says who moved it and when.
+        */
+        const txn = await Transaction.findOne({ gatewayRef: orderId });
+        if (txn) {
+            txn.moveTo('verified', { by: 'gateway', note: 'PAYMENT_SUCCESS_WEBHOOK' });
+            await txn.save();
+        }
         if (txn?.deal) {
             /**
              * Two different payments arrive as `escrow_fund`.
@@ -81,13 +87,32 @@ export const webhook = catchAsync(async (req, res) => {
                 await confirmEscrowFunded(txn.deal.toString());
             }
         }
+    } else if (orderId && type === 'PAYMENT_USER_DROPPED_WEBHOOK') {
+        /*
+          The brand opened checkout and left without paying. Not a failure —
+          nothing was refused — so it does not go to `failed` and does not
+          notify anyone. The order simply goes back to being unpaid.
+        */
+        const txn = await Transaction.findOne({ gatewayRef: orderId, status: { $in: ['pending', 'initiated'] } });
+        if (txn) {
+            txn.moveTo('pending', { by: 'gateway', note: 'Checkout abandoned' });
+            await txn.save();
+        }
     } else if (orderId && type === 'PAYMENT_FAILED_WEBHOOK') {
-        const txn = await Transaction.findOneAndUpdate(
-            { gatewayRef: orderId },
-            { status: 'failed' },
-            { new: true },
-        );
-        // No auto-retry, no auto-cancel — Admin decides (A11).
+        const txn = await Transaction.findOne({ gatewayRef: orderId });
+        if (txn) {
+            txn.moveTo('failed', {
+                by: 'gateway',
+                note: req.body?.data?.error?.error_description ?? 'PAYMENT_FAILED_WEBHOOK',
+            });
+            await txn.save();
+        }
+        /*
+          Still no automatic retry and no automatic cancellation (A11). The
+          collaboration stays exactly where it is and the chat stays locked;
+          what changed is that the brand is now told they can try again, rather
+          than told to wait for a review that most failures do not need.
+        */
         if (txn?.deal) await flagEscrowFailure(txn.deal.toString(), req.body?.data?.error?.error_description);
     }
     ok(res, { received: true });

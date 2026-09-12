@@ -260,15 +260,26 @@ test('the summary reads the stored figures rather than recomputing them', () => 
         'the summary must not compute payments — a derived figure will drift from the payout');
 });
 
-test('the summary does not claim a split charge that does not happen yet', () => {
-    // The schedule is agreed and stored; `createPaymentSession` still raises a
-    // single order. Saying otherwise would be a false statement about money.
+test('the summary claims exactly what the payment path does', () => {
+    /**
+     * This test caught its own subject changing. It used to assert the copy
+     * said "collects the full amount in one payment", bound to
+     * `createEscrowOrder(deal.id, deal.terms.amount)` — and when the advance
+     * charge landed, it failed, which is what it was for.
+     *
+     * Now: the advance IS charged, the balance is not, and the copy says both.
+     */
     const src = readFileSync(path.join(FRONTEND, 'components', 'deals', 'FinalTerms.jsx'), 'utf8');
-    assert.match(src, /collects the full amount in one/i);
+    assert.match(src, /advance is collected before work starts/i);
+    assert.match(src, /remaining 50% is\s*\n?\s*not switched on yet/i);
 
     const service = code('modules/deals/deals.service.js');
-    assert.match(service, /createEscrowOrder\(deal\.id, deal\.terms\.amount\)/,
-        'if this changes, the copy above has to change with it');
+    // The advance is what the order is raised for.
+    assert.match(service, /const advance = deal\.escrow\?\.schedule\?\.advance\?\.amount/);
+    assert.match(service, /createEscrowOrder\(orderKey, amount\)/);
+    // And nothing collects the balance, so release refuses rather than paying
+    // out money that was never taken.
+    assert.match(service, /The remaining 50% has not been paid into escrow/);
 });
 
 /* ──────────────────────────── both sides see it ──────────────────────────── */
