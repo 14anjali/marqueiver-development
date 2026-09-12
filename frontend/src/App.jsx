@@ -25,6 +25,7 @@ import BrandProfilePage from './pages/BrandProfilePage';
 import CampaignsPage from './pages/CampaignsPage';
 import CampaignCreatePage from './pages/CampaignCreatePage';
 import CampaignDetailPage from './pages/CampaignDetailPage';
+import CampaignApplicantsPage from './pages/CampaignApplicantsPage';
 import DealsPage from './pages/DealsPage';
 import DealDetailPage from './pages/DealDetailPage';
 import MessagesPage from './pages/MessagesPage';
@@ -192,6 +193,9 @@ export default function App() {
                 the route as well as in the controller. */}
             <Route path="/campaigns/new" element={<RoleRoute allow={['brand']}><CampaignCreatePage /></RoleRoute>} />
             <Route path="/campaigns/:id/edit" element={<RoleRoute allow={['brand']}><CampaignCreatePage /></RoleRoute>} />
+            {/* The brand's review queue. Brand-only at the route; the handler
+                also refuses a campaign this brand does not own. */}
+            <Route path="/campaigns/:id/applicants" element={<RoleRoute allow={['brand']}><CampaignApplicantsPage /></RoleRoute>} />
             {/* Declared after /campaigns/new and /campaigns/:id/edit so neither
                 is captured as an id. Open to both roles: a creator reads the
                 brief, and a brand can see its own campaign the way a creator

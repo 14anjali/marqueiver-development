@@ -503,7 +503,16 @@ export const api = {
   myApplications: () => req('/api/campaigns/applied'),
   applicationUploadUrl: (fileName, contentType) =>
     req('/api/users/me/logo-upload-url', { method: 'POST', body: { fileName, contentType, purpose: 'application' } }),
-  listCampaignApplicants: (id) => req(`/api/campaigns/${id}/applicants`),
+  /**
+   * Applicants for the brand's own campaign. `status` narrows to one review
+   * state and `sort` orders the queue; the response's `meta.counts` carries
+   * every status's count so the tabs stay honest while a filter is on.
+   */
+  listCampaignApplicants: (id, params = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v));
+    const query = qs.toString();
+    return req(`/api/campaigns/${id}/applicants${query ? `?${query}` : ''}`);
+  },
   // §10 — campaigns this creator has applied to, with status from the server.
   listMyApplications: () => req('/api/campaigns/applied'),
   decideApplicant: (id, creatorId, status, message) =>

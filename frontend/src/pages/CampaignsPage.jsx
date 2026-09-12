@@ -43,80 +43,14 @@ const SEARCH_DEBOUNCE_MS = 350;
 
 const BLANK_FILTERS = { q: '', category: '', platform: '', minBudget: '' };
 
-function ApplicantsModal({ campaign, onClose }) {
-  const [applicants, setApplicants] = useState(null);
-  const [error, setError] = useState(null);
-  const [busyId, setBusyId] = useState(null);
-  const toast = useToast();
-
-  useEffect(() => {
-    api.listCampaignApplicants(campaign._id).then(({ data }) => setApplicants(data)).catch(setError);
-  }, [campaign._id]);
-
-  async function decide(creatorId, status) {
-    setBusyId(creatorId);
-    try {
-      await api.decideApplicant(campaign._id, creatorId, status);
-      setApplicants((list) => list.map((a) => (a.creator === creatorId ? { ...a, status } : a)));
-      toast.push(status === 'accepted' ? 'Creator selected' : 'Application declined', 'success');
-    } catch (e) { toast.push(e.message, 'error'); }
-    finally { setBusyId(null); }
-  }
-
-  return (
-    <Modal
-      open onClose={onClose} size="lg"
-      title={`Applicants — ${campaign.title}`}
-      description="Accepting opens a negotiation. You can accept more than one."
-    >
-      {error ? <ErrorBlock error={error} />
-        : !applicants ? <SkeletonList count={3} label="Loading applicants…" />
-          : !applicants.length ? (
-            <EmptyBlock
-              title="No applicants yet"
-              sub="Creators who apply appear here. Campaigns usually see their first applications within a day of going live."
-              icon={<Users className="w-6 h-6" />}
-            />
-          ) : (
-            <div className="divide-y divide-line">
-              {applicants.map((a) => (
-                <div key={a.creator} className="flex items-center gap-3 py-3 flex-wrap sm:flex-nowrap">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-ink truncate">
-                      {a.profile?.displayName || 'Creator'}
-                    </div>
-                    <div className="text-xs text-muted truncate">
-                      {a.profile?.headline}
-                      {a.profile?.totalAudience ? ` · ${a.profile.totalAudience.toLocaleString('en-IN')} audience` : ''}
-                    </div>
-                  </div>
-                  {a.status === 'pending' ? (
-                    <div className="flex gap-2 shrink-0">
-                      <button
-                        onClick={() => decide(a.creator, 'accepted')}
-                        disabled={busyId === a.creator}
-                        className="btn-brand text-xs py-1.5 px-3"
-                      >
-                        {busyId === a.creator ? <Spinner className="w-3.5 h-3.5" /> : <><Check className="w-3.5 h-3.5" /> Select</>}
-                      </button>
-                      <button
-                        onClick={() => decide(a.creator, 'rejected')}
-                        disabled={busyId === a.creator}
-                        className="btn-ghost text-xs py-1.5 px-3 text-rose-500"
-                      >
-                        <X className="w-3.5 h-3.5" /> Decline
-                      </button>
-                    </div>
-                  ) : (
-                    <StatusPill status={a.status === 'accepted' ? 'completed' : 'declined'} />
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-    </Modal>
-  );
-}
+/**
+ * Reviewing applicants is a page now, not a modal.
+ *
+ * `ApplicantsModal` showed a name, a headline and two buttons — enough to
+ * accept someone whose pitch, work and proposed price you had not read. The
+ * review queue at `/campaigns/:id/applicants` replaced it, and this page links
+ * there.
+ */
 
 export default function CampaignsPage() {
   const { user } = useAuth();
@@ -126,7 +60,6 @@ export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [applicantsFor, setApplicantsFor] = useState(null);
   const [submittingId, setSubmittingId] = useState(null);
   const [filter, setFilter] = useState('all');
 
@@ -252,16 +185,12 @@ export default function CampaignsPage() {
             campaign={c}
             busy={submittingId === c._id}
             onSubmit={() => submitForReview(c._id)}
-            onApplicants={() => setApplicantsFor(c)}
           />
         ) : (
           <CampaignCard key={c._id} campaign={c} />
         )))}
       </div>
 
-      {applicantsFor && (
-        <ApplicantsModal campaign={applicantsFor} onClose={() => setApplicantsFor(null)} />
-      )}
     </AppPage>
   );
 }
@@ -338,7 +267,7 @@ function CampaignSearch({ value, onChange, onClear, active }) {
  * the state, the reviewer's reason when there is one, and the next action —
  * none of which a creator ever sees.
  */
-function BrandCampaignCard({ campaign: c, busy, onSubmit, onApplicants }) {
+function BrandCampaignCard({ campaign: c, busy, onSubmit }) {
   const reduced = usePrefersReducedMotion();
   const needsResubmit = c.status === 'rejected' || c.status === 'draft';
 
@@ -398,13 +327,15 @@ function BrandCampaignCard({ campaign: c, busy, onSubmit, onApplicants }) {
               </button>
             </>
           )}
-          <button
-            onClick={onApplicants}
-            disabled={c.status !== 'open' && !(c.applicants?.length)}
-            className="btn-outline w-full text-sm disabled:opacity-40"
-          >
-            Applicants ({c.applicants?.length ?? 0})
-          </button>
+          {c.applicants?.length || c.status === 'open' ? (
+            <Link to={`/campaigns/${c._id}/applicants`} className="btn-outline w-full text-sm">
+              Applicants ({c.applicants?.length ?? 0})
+            </Link>
+          ) : (
+            <span className="btn-outline w-full text-sm opacity-40 cursor-not-allowed">
+              Applicants (0)
+            </span>
+          )}
         </div>
       </div>
     </motion.article>

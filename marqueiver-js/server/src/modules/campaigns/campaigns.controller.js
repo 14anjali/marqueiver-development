@@ -14,14 +14,14 @@ import { brandSummariesFor, brandSummaryFor } from './brandSummary.service.js';
 import {
     applicationSchema, validateAgainstCampaign, pruneAnswers,
 } from './application.schema.js';
-
-/** Re-exported so `campaigns.routes.js` wires validation from one module. */
-export { applicationSchema };
 import { creatorEligibility, applicationWindow } from './campaignEligibility.service.js';
 import { INCLUDED_REVISIONS } from '../../models/Deal.js';
 import { notify } from '../notifications/notifications.service.js';
 import { openThread } from '../deals/negotiation.service.js';
 import { transitionDeal } from '../deals/deals.service.js';
+
+/** Re-exported so `campaigns.routes.js` wires validation from one module. */
+export { applicationSchema };
 
 /**
  * Campaign/deal management (feature #23). The `Campaign` model already
@@ -813,18 +813,91 @@ function shapeApplication(applicant) {
     };
 }
 
-/** Applicant list with creator display info, for the owning brand's UI. */
+/**
+ * Everything the brand's review card shows about a creator — and nothing else.
+ *
+ * An allow-list, not a `-field` subtraction. `discovery.controller.js` removes
+ * `payoutMethod`, `pan`, `phone`, `email` and `kyc` from creator reads, and
+ * that is the right boundary; naming the fields wanted rather than the fields
+ * feared means a sensitive field added to CreatorProfile tomorrow cannot arrive
+ * here by default.
+ *
+ * `contactEmail` and `contactPhone` are deliberately absent too. Policy 4.2
+ * exists so a collaboration stays on the platform, and handing a brand a
+ * creator's direct line at the application stage is exactly how it does not.
+ */
+const APPLICANT_PROFILE_FIELDS = [
+    'user', 'displayName', 'headline', 'bio', 'avatarUrl',
+    'categories', 'languages', 'location', 'availability',
+    'socialAccounts', 'totalAudience', 'avgEngagement', 'creatorScore',
+    'portfolio', 'portfolioLink', 'contentTypes', 'collaborationTypes',
+].join(' ');
+
+/**
+ * Applicants for the brand's own campaign, filtered and sorted.
+ *
+ * The list is the brand's review queue, so it answers the two questions a
+ * reviewer actually has — who is in which state, and who is worth reading
+ * first — rather than returning everything in insertion order and leaving the
+ * browser to sort a payload it may only have part of.
+ */
 export const listApplicants = catchAsync(async (req, res) => {
     const campaign = await Campaign.findById(req.params.id).lean();
     if (!campaign) throw ApiError.notFound('Campaign not found');
     if (campaign.brand.toString() !== req.auth.sub) throw ApiError.forbidden();
+
     const creatorIds = campaign.applicants.map((a) => a.creator);
-    const profiles = await CreatorProfile.find({ user: { $in: creatorIds } })
-        .select('user displayName headline totalAudience avgEngagement location').lean();
+
+    const [profiles, users, socialVerifications] = await Promise.all([
+        CreatorProfile.find({ user: { $in: creatorIds } }).select(APPLICANT_PROFILE_FIELDS).lean(),
+        // Policy 13.1 Basic is a verified mobile and email. The documents behind
+        // any verification are never read here and never shown to a brand.
+        User.find({ _id: { $in: creatorIds } }).select('phoneVerified emailVerified').lean(),
+        Verification.find({
+            subject: { $in: creatorIds }, kind: 'social', status: 'approved',
+        }).select('subject').lean(),
+    ]);
+
     const byUser = new Map(profiles.map((p) => [String(p.user), p]));
-    const enriched = campaign.applicants.map((a) => ({
-        ...shapeApplication(a),
-        profile: byUser.get(String(a.creator)) || null,
-    }));
-    ok(res, enriched);
+    const userById = new Map(users.map((u) => [String(u._id), u]));
+    const socialVerified = new Set(socialVerifications.map((v) => String(v.subject)));
+
+    let items = campaign.applicants.map((a) => {
+        const id = String(a.creator);
+        const user = userById.get(id);
+        return {
+            ...shapeApplication(a),
+            profile: byUser.get(id) ?? null,
+            verification: {
+                identity: Boolean(user?.phoneVerified && user?.emailVerified),
+                social: socialVerified.has(id),
+            },
+        };
+    });
+
+    if (req.query.status) {
+        const wanted = String(req.query.status);
+        items = items.filter((a) => a.status === wanted);
+    }
+
+    const SORTS = {
+        // Newest first is the default: a reviewer works through what arrived.
+        recent: (a, b) => new Date(b.appliedAt ?? 0) - new Date(a.appliedAt ?? 0),
+        oldest: (a, b) => new Date(a.appliedAt ?? 0) - new Date(b.appliedAt ?? 0),
+        followers: (a, b) => (b.profile?.totalAudience ?? 0) - (a.profile?.totalAudience ?? 0),
+        engagement: (a, b) => (b.profile?.avgEngagement ?? 0) - (a.profile?.avgEngagement ?? 0),
+        // Ascending: the cheapest proposal first. An application with no price
+        // sorts last rather than as zero, which would put it at the top.
+        price: (a, b) => (a.submission?.proposedPrice ?? Infinity) - (b.submission?.proposedPrice ?? Infinity),
+    };
+    items.sort(SORTS[req.query.sort] ?? SORTS.recent);
+
+    /** Counts for every status, so the tabs do not lie when a filter is on. */
+    const counts = campaign.applicants.reduce((acc, a) => {
+        const status = normaliseApplicationStatus(a.status);
+        acc[status] = (acc[status] ?? 0) + 1;
+        return acc;
+    }, {});
+
+    ok(res, items, { counts, total: campaign.applicants.length });
 });
