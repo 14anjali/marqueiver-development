@@ -499,7 +499,52 @@ const dealSchema = new Schema({
         needsAdminReview: { type: Boolean, default: false },
     },
     workSubmissions: { type: [submissionSchema], default: [] },
+
+    /**
+     * How many included revision rounds have been used.
+     *
+     * Incremented in exactly one place — `applyStateFields`, on the transition
+     * into `revision` — and never written anywhere else. In particular nothing
+     * in the submission path touches it: uploading a new file is how a creator
+     * ANSWERS a revision, not a reason to forget one happened. A counter that a
+     * resubmission could reset would give a brand unlimited free rounds and
+     * leave the creator with no way to show it.
+     */
     revisionCount: { type: Number, default: 0 },
+
+    /**
+     * The revision rounds themselves, one row each.
+     *
+     * `revisionCount` says how many; this says what each one was about. They are
+     * different questions and the second is the one a creator asks three weeks
+     * later ("what did they actually want changed in round 2?"). Derivable from
+     * the timeline and the submission reviews only by stitching two records
+     * together and hoping they line up — so it is recorded once, here.
+     *
+     * Append-only. A round closes when the creator resubmits: `resolvedAt` and
+     * the id of the submission that answered it are filled in, and the row is
+     * never otherwise touched.
+     */
+    revisions: {
+        type: [{
+            /** 1-based, and it matches `revisionCount` at the time it was opened. */
+            round: { type: Number, required: true },
+            /** Mandatory — Policy 5.4. A round with no reason cannot be answered. */
+            reason: { type: String, required: true },
+            requestedAt: { type: Date, default: Date.now },
+            requestedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+            requestedByRole: { type: String, enum: ['brand', 'admin'], default: 'brand' },
+            /** Which submission the brand was looking at. */
+            submission: { type: Schema.Types.ObjectId },
+            /** Which agreed deliverable, when the submission named one. */
+            deliverableKey: String,
+            deliverableLabel: String,
+            /** Filled when the creator answers it. */
+            resolvedAt: Date,
+            resolvedBySubmission: { type: Schema.Types.ObjectId },
+        }],
+        default: [],
+    },
     dispute: {
         raisedBy: { type: Schema.Types.ObjectId, ref: 'User' },
         reason: String,

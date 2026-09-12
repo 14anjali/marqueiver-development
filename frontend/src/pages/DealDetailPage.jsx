@@ -14,9 +14,10 @@ import WorkspaceHeader from '../components/deals/WorkspaceHeader';
 import CollaborationFiles from '../components/deals/CollaborationFiles';
 import ActivityHistory from '../components/deals/ActivityHistory';
 import DeliverablesPanel from '../components/deals/DeliverablesPanel';
+import RevisionRounds from '../components/deals/RevisionRounds';
 import { MESSAGING_ALLOWED_STATES, MESSAGING_LOCK_REASON } from '../components/deals/messagingLock';
 import { Modal } from '../components/overlay';
-import { StatusPill, Money, Progress, SkeletonCard, SuccessMark } from '../components/feedback';
+import { StatusPill, Money, SkeletonCard, SuccessMark } from '../components/feedback';
 import { ChevLeft, Star, Check } from '../components/icons';
 import { api } from '../lib/api';
 import { openCashfreeCheckout } from '../lib/cashfree';
@@ -316,8 +317,10 @@ export default function DealDetailPage() {
   const heldAmount = balanceOwed && sched?.advance?.funded
     ? sched.advance.amount
     : (deal.escrow?.amount ?? deal.terms?.amount);
-  const revisionsUsed = deal.revisionCount ?? 0;
-  const revisionsAllowed = deal.terms?.revisionsAllowed ?? 3;
+  /*
+    The revision budget comes from the deliverables endpoint, with the rounds and
+    their reasons — see RevisionRounds. The page no longer counts it itself.
+  */
   /**
    * The same gate the server enforces, and the same reasons.
    *
@@ -372,21 +375,20 @@ export default function DealDetailPage() {
               />
             </motion.section>
 
-            {/* Revisions, where the parties can see them rather than
-                discovering the cap when they hit it. */}
-            {revisionsUsed > 0 && (
-              <motion.section variants={withReducedMotion(rise, reduced)} className="card p-5">
-                <Progress
-                  value={revisionsUsed}
-                  max={revisionsAllowed}
-                  tone={revisionsUsed >= revisionsAllowed ? 'money' : 'brand'}
-                  label={`${revisionsUsed} of ${revisionsAllowed} revisions used`}
+            {/*
+              The revision budget, and what each round asked for. It was a bare
+              progress bar that appeared only after the first round was spent —
+              so the limit was discovered by hitting it, and the reason a round
+              was requested lived nowhere a creator could re-read it.
+            */}
+            {['in_progress', 'submitted', 'revision', 'resolution', 'disputed', 'completed']
+              .includes(deal.state) && (
+              <motion.section variants={withReducedMotion(rise, reduced)}>
+                <RevisionRounds
+                  revisions={deliverables?.revisions}
+                  role={role}
+                  state={deal.state}
                 />
-                {revisionsUsed >= revisionsAllowed && (
-                  <p className="text-xs text-money-700 mt-2">
-                    Included revisions are used up. Further work needs agreed additional terms.
-                  </p>
-                )}
               </motion.section>
             )}
 

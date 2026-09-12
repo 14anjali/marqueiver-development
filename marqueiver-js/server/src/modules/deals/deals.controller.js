@@ -22,6 +22,9 @@ import {
     agreedDeliverables, deliverableProgress, toSubmissionFile,
     allDeliverablesApproved, outstandingDeliverables,
 } from './deliverables.service.js';
+import {
+    revisionState, revisionHistory, recordRevisionRequest, resolveOpenRevision,
+} from './revisions.service.js';
 import { notify, dealPayload } from '../notifications/notifications.service.js';
 import { DEAL_STATES } from '../../../../shared/types.js';
 /**
@@ -366,6 +369,18 @@ export const submitWork = catchAsync(async (req, res) => {
         late,
     });
 
+    /**
+     * This resubmission answers the open revision round — and does not reset
+     * anything. `revisionCount` is written in one place only, the transition
+     * into `revision`; uploading a new file is how a creator ANSWERS a round,
+     * not a reason to forget it happened. A counter a resubmission could reset
+     * would hand the brand unlimited free rounds.
+     */
+    if (deal.state === 'revision') {
+        const added = deal.workSubmissions[deal.workSubmissions.length - 1];
+        resolveOpenRevision(deal, added?._id);
+    }
+
     // Policy 5.3 — the Brand's 7-day review window opens now. The scheduler
     // reads this deadline; nothing else needs to know the duration.
     deal.reviewDeadline = new Date(now.getTime() + REVIEW_WINDOW_DAYS * 24 * 3600 * 1000);
@@ -400,8 +415,8 @@ export const listDeliverables = catchAsync(async (req, res) => {
         allApproved: allDeliverablesApproved(deal),
         outstanding: outstandingDeliverables(deal),
         revisions: {
-            used: deal.revisionCount ?? 0,
-            allowed: deal.terms?.revisionsAllowed ?? INCLUDED_REVISIONS,
+            ...revisionState(deal),
+            history: revisionHistory(deal),
         },
         reviewDeadline: deal.reviewDeadline ?? null,
     });
@@ -416,7 +431,7 @@ export const listDeliverables = catchAsync(async (req, res) => {
  * endpoint is to repeat the cap check, and the two copies then disagree the
  * first time either is changed.
  */
-async function moveToRevision(deal, { actorId, note }) {
+async function moveToRevision(deal, { actorId, note, submission }) {
     const check = canRequestRevision(deal);
     if (!check.allowed) {
         // Move to Resolution rather than refusing outright — the Brand still
@@ -425,12 +440,28 @@ async function moveToRevision(deal, { actorId, note }) {
         await deal.save();
         const moved = await transitionDeal({
             dealId: deal.id, to: 'resolution', actor: 'brand', actorId,
-            note: `All ${check.limit} agreed revision rounds used — moved to Resolution (Policy 5.5)`,
+            /*
+              The brand's reason is carried through rather than dropped. They
+              wrote it to describe work they want done, and it is exactly the
+              scope note the additional-terms offer needs — losing it means
+              asking them to type it again, in a different box, a screen later.
+            */
+            note: note
+                ? `All ${check.limit} agreed revision rounds used — moved to Resolution (Policy 5.5). Requested: ${note}`
+                : `All ${check.limit} agreed revision rounds used — moved to Resolution (Policy 5.5)`,
         });
         return {
             deal: moved,
             revisionsExhausted: true,
-            message: `You have used all ${check.limit} agreed revision rounds. Choose a resolution option.`,
+            /*
+              Not a revision, and not refused either. Further work after the
+              included rounds is new scope: the creator can decline it and it has
+              its own price (Policy 5.5 option B).
+            */
+            additionalWork: true,
+            requested: note ?? '',
+            message: `All ${check.limit} included revisions have been used. Further changes are `
+                + 'additional work — offer the creator a fee for the extra rounds, or settle the collaboration.',
         };
     }
 
@@ -438,12 +469,21 @@ async function moveToRevision(deal, { actorId, note }) {
      * The counter is incremented by `transitionDeal`, not here — see the note on
      * the deal-level endpoint below.
      */
+    /*
+      The round is opened before the transition, so its number matches what
+      `revisionCount` becomes — the transition is still the only thing that
+      increments the counter.
+    */
+    recordRevisionRequest(deal, { reason: note, actorId, submission });
+    await deal.save();
+
     const updated = await transitionDeal({
         dealId: deal.id, to: 'revision', actor: 'brand', actorId,
         note: note || `Revision ${check.used + 1} of ${check.limit} requested`,
     });
     return {
         deal: updated,
+        round: check.used + 1,
         revisionsUsed: updated.revisionCount,
         revisionsAllowed: check.limit,
         revisionsRemaining: Math.max(0, check.limit - (updated.revisionCount ?? 0)),
@@ -515,7 +555,9 @@ export const reviewSubmission = catchAsync(async (req, res) => {
 
     if (decision === 'revision') {
         await deal.save();
-        const result = await moveToRevision(deal, { actorId: req.auth.sub, note: feedback?.trim() });
+        const result = await moveToRevision(deal, {
+            actorId: req.auth.sub, note: feedback?.trim(), submission,
+        });
         await notify({
             user: deal.creator.toString(),
             type: 'deal.revision_requested',
