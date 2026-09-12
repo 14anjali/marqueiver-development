@@ -82,6 +82,20 @@ export const LANGUAGES = [
 
 export const AUDIENCE_AGE_RANGES = ['13–17', '18–24', '25–34', '35–44', '45–54', '55+'];
 
+/**
+ * Countries, for both the creator's own location and their audience's.
+ *
+ * This has to be one shared list, not a per-screen one. Discovery matches
+ * audience locations as exact array terms, so a creator who declared "UK" and a
+ * brand who filtered for "United Kingdom" simply never meet — and neither of
+ * them can see why. The same list on both sides is what makes the filter
+ * capable of returning anything.
+ */
+export const LOCATIONS = [
+  'India', 'United States', 'United Kingdom', 'UAE',
+  'Singapore', 'Australia', 'Canada', 'Germany',
+];
+
 export const EXPERIENCE_LEVELS = [
   'Any experience',
   'Has worked with brands before',

@@ -3,38 +3,48 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import AppShell from '../components/AppShell';
 import { VerifiedName, Rating, Avail } from '../components/ui';
-import { Modal } from '../components/overlay';
+import RequirementForm from '../components/deals/RequirementForm';
 import { AnimatedNumber, Money, SkeletonCard, Progress } from '../components/feedback';
-import { Mail, MapPin, Star, Play, Send, Bookmark, Platform, ChevLeft, Image } from '../components/icons';
+import { Mail, MapPin, Star, Play, Send, Bookmark, Platform, ChevLeft, Image, ShieldCheck, Check } from '../components/icons';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { useToast, Spinner, ErrorBlock, EmptyBlock } from '../lib/ui-state';
-import { rupee, fmt } from '../lib/normalize';
+import { useToast, ErrorBlock, EmptyBlock } from '../lib/ui-state';
+import { fmt } from '../lib/normalize';
 import { rise, stagger, page as pageMotion, withReducedMotion, usePrefersReducedMotion } from '../lib/motion';
 
 /**
- * A creator, as a brand sees them. The page a shortlisting decision is made on.
+ * A creator, as a brand sees them — the page Route 2's selection decision is
+ * made on, and the step before a requirement is sent.
  *
- * Three real fixes:
+ * Earlier fixes kept here:
  *
  *  1. **The save state was always wrong on load.** `saved` initialised to
  *     `false` and nothing ever asked the server, so an already-shortlisted
  *     creator showed "Save creator" and clicking it produced a duplicate-save
  *     error. It now reads the saved list on mount.
  *
- *  2. **"Invite to campaign" fired instantly with invented terms** — no
- *     confirmation, `revisionsAllowed: 1` hardcoded against a platform standard
- *     of 3, and `deliverables: 'To be discussed'`. One click created a real deal
- *     and navigated away from the page. It now opens a dialog showing exactly
- *     what will be created.
- *
- *  3. **`dataSource` was a grey pill either way.** "Live data" from a connected
+ *  2. **`dataSource` was a grey pill either way.** "Live data" from a connected
  *     account and "self-reported" numbers a creator typed in looked identical,
  *     which is the one distinction a brand paying for reach needs.
+ *
+ * What changed for Route 2:
+ *
+ *  3. **The verification badge could not be true.** It read `d.verified`, and
+ *     `verified` is not a field on CreatorProfile — so every creator on the
+ *     platform, verified or not, rendered unverified. The server now derives
+ *     `verification.identity` and `verification.social` the same way the
+ *     applicant review queue does, and this reads those.
+ *
+ *  4. **"Invite to collaborate" sent a brief with no brief in it** — a
+ *     generated title, the cheapest rate-card line, and the string "To be
+ *     agreed during negotiation" as the deliverables. It now opens
+ *     `RequirementForm`, which is the actual Route 2 hand-off.
+ *
+ *  5. **Audience and track record were missing.** A brand approaching a
+ *     stranger has less to go on than one reading an application, so the two
+ *     things an application would have supplied — who the audience is, and
+ *     whether this creator has finished work before — are shown here.
  */
-
-/** Platform-standard revisions, matching INCLUDED_REVISIONS on the server. */
-const DEFAULT_REVISIONS = 3;
 
 export default function CreatorProfilePage() {
   const { id } = useParams();
@@ -48,7 +58,6 @@ export default function CreatorProfilePage() {
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [inviting, setInviting] = useState(false);
 
@@ -74,21 +83,16 @@ export default function CreatorProfilePage() {
       .catch(() => {});
   }, [isBrand, id, profile?.user]);
 
-  async function invite() {
-    if (!profile?.user) return;
-    setBusy(true);
-    try {
-      const { data } = await api.createDeal({
-        creatorId: profile.user,
-        title: `Collaboration with ${profile.displayName}`,
-        contentTypes: profile.contentTypes?.length ? profile.contentTypes : ['reel'],
-        amount: profile.rateCard?.[0]?.price || 0,
-        deliverables: 'To be agreed during negotiation',
-        revisionsAllowed: DEFAULT_REVISIONS,
-      });
-      toast.push('Invitation sent', 'success');
-      nav(`/deals/${data._id}`);
-    } catch (e) { toast.push(e.message, 'error'); setBusy(false); }
+  /**
+   * Route 2's hand-off into the shared collaboration workflow. The deal the
+   * form creates is the same Deal a campaign application produces — same
+   * states, same negotiation, same escrow — so this navigates to the ordinary
+   * deal page rather than anywhere special.
+   */
+  function onRequirementSent(deal) {
+    setInviting(false);
+    toast.push('Requirement sent — they can accept, decline or counter', 'success');
+    nav(`/deals/${deal._id}`);
   }
 
   async function toggleSave() {
@@ -131,11 +135,22 @@ export default function CreatorProfilePage() {
   }
 
   const d = profile;
-  const startingRate = d.rateCard?.[0]?.price ?? 0;
-  const avgRating = reviews.length
-    ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length)
-    : null;
+  const stats = d.stats ?? {};
+  const verification = d.verification ?? {};
+  /*
+    The server's rating is computed across every brand-to-creator review, not
+    just the page of reviews this component fetched, so it is the one to show.
+    The fetched list is still what renders the individual comments below.
+  */
+  const avgRating = stats.rating ?? (reviews.length
+    ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length
+    : null);
+  const ratingCount = stats.ratingCount ?? reviews.length;
   const totalFollowers = (d.socialAccounts || []).reduce((s, p) => s + (p.followers ?? 0), 0);
+  const audience = d.audience ?? {};
+  const hasAudience = Boolean(audience.declaredAt) && [
+    audience.locations, audience.ageRanges, audience.genders, audience.interests,
+  ].some((a) => a?.length);
 
   return (
     <AppShell>
@@ -179,9 +194,34 @@ export default function CreatorProfilePage() {
                   <div className="flex-1 min-w-0 sm:pt-12">
                     <VerifiedName
                       name={d.displayName}
-                      verified={Boolean(d.verified)}
+                      verified={Boolean(verification.identity)}
                       className="font-display font-extrabold text-xl text-ink"
                     />
+
+                    {/*
+                      Policy 13.1 levels, stated rather than reduced to one tick.
+                      "Identity verified" and "social verified" are different
+                      claims, and a brand paying a stranger should see which it
+                      has. Policy 13.5 — the documents behind either are never
+                      shown, and the server does not send them.
+                    */}
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {[
+                        ['identity', 'Identity verified', 'Phone and email confirmed'],
+                        ['social', 'Social verified', 'Account ownership confirmed'],
+                      ].map(([key, label, title]) => (
+                        <span
+                          key={key}
+                          title={verification[key] ? title : 'Not verified yet'}
+                          className={verification[key]
+                            ? 'pill-done inline-flex items-center gap-1'
+                            : 'pill-quiet inline-flex items-center gap-1'}
+                        >
+                          {verification[key] ? <Check className="w-3 h-3" /> : <ShieldCheck className="w-3 h-3" />}
+                          {verification[key] ? label : `No ${key} verification`}
+                        </span>
+                      ))}
+                    </div>
                     {d.headline && <p className="text-sm text-muted mt-0.5">{d.headline}</p>}
                     {(d.location?.city || d.location?.country) && (
                       <p className="inline-flex items-center gap-1 text-sm text-muted mt-1">
@@ -258,6 +298,44 @@ export default function CreatorProfilePage() {
               )}
             </motion.section>
 
+            {/* ── who watches them ──────────────────────────────────── */}
+            {hasAudience && (
+              <motion.section variants={withReducedMotion(rise, reduced)} className="card p-4 sm:p-5">
+                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+                  <h2 className="font-display font-bold text-ink text-sm">Their audience</h2>
+                  <span className="pill-quiet">Creator-declared</span>
+                </div>
+                {/*
+                  Said plainly, once. No integration on the platform returns
+                  demographic breakdowns — Instagram's account insights are
+                  reach and engagement metrics — so this is the creator's own
+                  description. Presenting it as measured would be the Policy
+                  3.2 mistake `selfReportedMetrics` exists to prevent.
+                */}
+                <p className="text-xs text-muted leading-relaxed mb-3.5 max-w-prose">
+                  Described by the creator, not measured from their accounts. Last stated{' '}
+                  {new Date(audience.declaredAt).toLocaleDateString('en-IN', {
+                    day: 'numeric', month: 'short', year: 'numeric',
+                  })}.
+                </p>
+                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3.5">
+                  {[
+                    ['Mostly in', audience.locations],
+                    ['Mostly aged', audience.ageRanges],
+                    ['Mostly', audience.genders],
+                    ['Interested in', audience.interests],
+                  ].filter(([, v]) => v?.length).map(([label, values]) => (
+                    <div key={label}>
+                      <dt className="text-xs font-semibold text-muted">{label}</dt>
+                      <dd className="flex flex-wrap gap-1.5 mt-1.5">
+                        {values.map((v) => <span key={v} className="chip capitalize">{v}</span>)}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </motion.section>
+            )}
+
             {/* ── portfolio ─────────────────────────────────────────── */}
             <motion.section variants={withReducedMotion(rise, reduced)} className="card p-4 sm:p-5">
               <h2 className="font-display font-bold text-ink text-sm mb-3">Portfolio</h2>
@@ -298,7 +376,7 @@ export default function CreatorProfilePage() {
             {isBrand && (
               <motion.div variants={withReducedMotion(rise, reduced)} className="space-y-2">
                 <button onClick={() => setInviting(true)} className="btn-cta w-full py-3">
-                  Invite to collaborate <Send className="w-4 h-4" />
+                  Send a requirement <Send className="w-4 h-4" />
                 </button>
                 <button onClick={() => nav('/messages')} className="btn-outline w-full">
                   <Mail className="w-4 h-4" /> Message
@@ -312,6 +390,36 @@ export default function CreatorProfilePage() {
                 </button>
               </motion.div>
             )}
+
+            {/*
+              Track record. Counts only — the titles and the brands behind a
+              creator's past collaborations belong to those brands too, and
+              nobody agreed to appear on a public client list. The number is
+              still what a brand approaching a stranger wants: has this person
+              finished work here before.
+            */}
+            <motion.section variants={withReducedMotion(rise, reduced)} className="card p-4">
+              <h2 className="font-display font-bold text-ink mb-3 text-sm">Track record</h2>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  ['Collaborations', stats.completedCollaborations ?? 0, 'completed here'],
+                  ['Rating', avgRating != null ? avgRating.toFixed(1) : '—',
+                    ratingCount ? `from ${ratingCount}` : 'no reviews yet'],
+                ].map(([label, value, note]) => (
+                  <div key={label} className="rounded-xl2 border border-line p-3 min-w-0">
+                    <div className="font-display font-extrabold text-ink text-lg tnum">{value}</div>
+                    <div className="text-[11px] text-muted break-words">{label}</div>
+                    <div className="text-[10px] text-muted mt-0.5 break-words">{note}</div>
+                  </div>
+                ))}
+              </div>
+              {stats.memberSince && (
+                <p className="text-[11px] text-muted mt-3">
+                  On Marqueiver since{' '}
+                  {new Date(stats.memberSince).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}.
+                </p>
+              )}
+            </motion.section>
 
             <motion.section variants={withReducedMotion(rise, reduced)} className="card p-4 text-sm">
               <h2 className="font-display font-bold text-ink mb-3 text-sm">Availability</h2>
@@ -332,7 +440,7 @@ export default function CreatorProfilePage() {
             <motion.section variants={withReducedMotion(rise, reduced)} className="card p-4">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="font-display font-bold text-ink text-sm">Reviews</h2>
-                {avgRating !== null && <Rating value={avgRating.toFixed(1)} count={`${reviews.length}`} />}
+                {avgRating != null && <Rating value={avgRating.toFixed(1)} count={`${ratingCount}`} />}
               </div>
               {!reviews.length ? (
                 <p className="text-xs text-muted leading-relaxed">
@@ -346,8 +454,16 @@ export default function CreatorProfilePage() {
                     ))}
                   </span>
                   {r.text && <p className="text-xs text-muted leading-relaxed">{r.text}</p>}
+                  {/*
+                    Spelled month, like every other date on this page. The
+                    numeric `en-IN` default rendered "2/7/2026" next to "14 Aug
+                    2026" and "Mar 2024" — and a bare d/m/y is ambiguous to half
+                    the people reading it.
+                  */}
                   <div className="text-[10px] text-muted mt-1 tnum">
-                    {new Date(r.createdAt).toLocaleDateString('en-IN')}
+                    {new Date(r.createdAt).toLocaleDateString('en-IN', {
+                      day: 'numeric', month: 'short', year: 'numeric',
+                    })}
                   </div>
                 </div>
               ))}
@@ -368,45 +484,16 @@ export default function CreatorProfilePage() {
         </motion.div>
       </motion.div>
 
-      {/* Nothing is created until this is confirmed. */}
-      <Modal
+      {/*
+        Route 2's hand-off. The requirement is written here, not invented — see
+        components/deals/RequirementForm.jsx.
+      */}
+      <RequirementForm
         open={inviting}
-        onClose={busy ? undefined : () => setInviting(false)}
-        dismissible={!busy}
-        title={`Invite ${d.displayName}?`}
-        description="This creates a collaboration and opens negotiation. Nothing is charged and no terms are binding until you both confirm them."
-        size="sm"
-        footer={(
-          <>
-            <button data-autofocus onClick={() => setInviting(false)} disabled={busy} className="btn-ghost">
-              Cancel
-            </button>
-            <button onClick={invite} disabled={busy} className="btn-cta">
-              {busy ? <><Spinner className="w-4 h-4" /> Sending…</> : 'Send invitation'}
-            </button>
-          </>
-        )}
-      >
-        <dl className="text-sm space-y-2">
-          <div className="flex justify-between gap-3">
-            <dt className="text-muted">Opening amount</dt>
-            <dd>{startingRate ? <Money amount={startingRate} className="text-sm" /> : <span className="text-muted">To be agreed</span>}</dd>
-          </div>
-          <div className="flex justify-between gap-3">
-            <dt className="text-muted">Content</dt>
-            <dd className="text-ink text-right">{(d.contentTypes?.length ? d.contentTypes : ['reel']).join(', ')}</dd>
-          </div>
-          <div className="flex justify-between gap-3">
-            <dt className="text-muted">Included revisions</dt>
-            <dd className="text-ink tnum">{DEFAULT_REVISIONS}</dd>
-          </div>
-        </dl>
-        <p className="text-xs text-muted mt-3 leading-relaxed">
-          {startingRate
-            ? 'Taken from their rate card as an opening position — you can negotiate from there.'
-            : 'This creator has no rate card, so the amount is settled in negotiation.'}
-        </p>
-      </Modal>
+        onClose={() => setInviting(false)}
+        creator={d}
+        onSent={onRequirementSent}
+      />
     </AppShell>
   );
 }

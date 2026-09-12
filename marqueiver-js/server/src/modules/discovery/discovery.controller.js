@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { catchAsync, ApiError } from '../../utils/apiError.js';
 import { ok } from '../../utils/respond.js';
-import { CreatorProfile, BrandProfile, SavedCreator, User } from '../../models/index.js';
+import { CreatorProfile, BrandProfile, SavedCreator, User, Verification, Deal, Review } from '../../models/index.js';
 import { brandVerificationLevel } from '../../services/verificationLevel.service.js';
 /**
  * Faceted creator discovery (proposal §5.2). All filters map to indexed fields.
@@ -19,6 +19,32 @@ export const searchCreatorsSchema = z.object({
     minRate: z.coerce.number().optional(),
     maxRate: z.coerce.number().optional(),
     availableOnly: z.coerce.boolean().optional(),
+
+    /* ── Route 2 filters ───────────────────────────────────────────────────
+     *
+     * A brand searching for a creator directly narrows by the same things it
+     * would write into a brief, so these mirror `Campaign.creatorRequirements`
+     * field for field. Every one of them maps to a real stored path — there is
+     * no filter here that the data cannot answer.
+     */
+    language: z.string().optional(),
+    contentType: z.string().optional(),
+    collaborationType: z.enum(['paid', 'barter']).optional(),
+
+    /** Creator-declared audience (CreatorProfile.audience). */
+    audienceLocation: z.string().optional(),
+    audienceAge: z.string().optional(),
+    audienceGender: z.string().optional(),
+    audienceInterest: z.string().optional(),
+
+    /**
+     * Policy 13.1 verification, as a filter rather than a claim. `identity` is
+     * the User-level phone+email pair; `social` is an approved social
+     * Verification. Both are resolved to a set of user ids before the profile
+     * query, because neither lives on CreatorProfile.
+     */
+    verified: z.enum(['identity', 'social', 'any']).optional(),
+
     sort: z.enum(['relevance', 'followers', 'engagement', 'rate']).default('relevance'),
     page: z.coerce.number().min(1).default(1),
     limit: z.coerce.number().min(1).max(50).default(20),
@@ -62,8 +88,47 @@ const PRIVATE_CREATOR_FIELDS = '-payoutMethod -pan -phone -email -kyc';
  */
 const PRIVATE_BRAND_FIELDS = '-gstin -billing -contactEmail -contactPhone -contactPerson -teamMembers';
 
-export const searchCreators = catchAsync(async (req, res) => {
-    const p = req.query;
+/**
+ * The verified-creator filter, resolved to user ids.
+ *
+ * Neither verification lives on CreatorProfile: identity is `phoneVerified &&
+ * emailVerified` on User, and social is an approved `Verification` row. So this
+ * runs first and hands back a `$in` set, or `null` when no filter was asked
+ * for. An empty array is a real answer — "nobody is verified" — and must not be
+ * confused with "no filter", which is why the caller checks for `null`.
+ */
+async function verifiedUserIds(kind) {
+    if (!kind) return null;
+
+    const [identityUsers, socialRows] = await Promise.all([
+        kind === 'social'
+            ? []
+            : User.find({ role: 'creator', phoneVerified: true, emailVerified: true })
+                .select('_id').lean(),
+        kind === 'identity'
+            ? []
+            : Verification.find({ kind: 'social', status: 'approved' }).select('subject').lean(),
+    ]);
+
+    const identity = identityUsers.map((u) => String(u._id));
+    const social = socialRows.map((v) => String(v.subject));
+
+    if (kind === 'identity') return identity;
+    if (kind === 'social') return social;
+    // 'any' — either one qualifies.
+    return [...new Set([...identity, ...social])];
+}
+
+/**
+ * One filter builder for search and export.
+ *
+ * These were two separate bodies of code, and they disagreed: `exportCreators`
+ * honoured only `category` and `availableOnly`, so a brand that filtered to
+ * eleven creators and pressed Export downloaded a thousand. Anything that
+ * narrows the list on screen has to narrow the file too, and the only way to
+ * keep that true is for there to be one definition of "the list".
+ */
+function buildCreatorFilter(p, verifiedIds) {
     // Policy 3.3 — an unpublished profile is excluded from discovery. Applied
     // to the filter rather than to the results, so it also fixes the counts.
     const filter = { isPublished: { $ne: false } };
@@ -79,6 +144,30 @@ export const searchCreators = catchAsync(async (req, res) => {
         filter.availability = true;
     if (p.platform)
         filter['socialAccounts.platform'] = p.platform;
+    if (p.language)
+        filter.languages = p.language;
+    if (p.contentType)
+        filter.contentTypes = p.contentType;
+    if (p.collaborationType)
+        filter.collaborationTypes = p.collaborationType;
+
+    /*
+      Audience, as the creator declared it. Matching on the array field is an
+      exact term match, which is why these come from fixed lists in the UI
+      rather than a free-text box — "18-24" and "18 to 24" would otherwise be
+      two different audiences.
+    */
+    if (p.audienceLocation)
+        filter['audience.locations'] = p.audienceLocation;
+    if (p.audienceAge)
+        filter['audience.ageRanges'] = p.audienceAge;
+    if (p.audienceGender)
+        filter['audience.genders'] = p.audienceGender;
+    if (p.audienceInterest)
+        filter['audience.interests'] = p.audienceInterest;
+
+    if (verifiedIds) filter.user = { $in: verifiedIds };
+
     if (p.minFollowers != null || p.maxFollowers != null) {
         filter.totalAudience = {
             ...(p.minFollowers != null ? { $gte: p.minFollowers } : {}),
@@ -93,6 +182,12 @@ export const searchCreators = catchAsync(async (req, res) => {
             ...(p.maxRate != null ? { $lte: p.maxRate } : {}),
         };
     }
+    return filter;
+}
+
+export const searchCreators = catchAsync(async (req, res) => {
+    const p = req.query;
+    const filter = buildCreatorFilter(p, await verifiedUserIds(p.verified));
     const sortMap = {
         relevance: { totalAudience: -1 },
         followers: { totalAudience: -1 },
@@ -164,20 +259,76 @@ export const getCreatorProfile = catchAsync(async (req, res) => {
         .select(PRIVATE_CREATOR_FIELDS).lean();
     if (!profile)
         throw ApiError.notFound('Creator not found');
-    ok(res, { profile });
+
+    /**
+     * ── Verification, derived ──────────────────────────────────────────────
+     *
+     * The profile page rendered `verified={Boolean(d.verified)}`, and
+     * `verified` is not a path on CreatorProfile — it never has been. So the
+     * badge was `false` for every creator on the platform, including verified
+     * ones, and a brand deciding whether to trust a stranger was reading a
+     * field that could not be true.
+     *
+     * It is derived the same way the applicant review queue derives it, so the
+     * two routes cannot disagree about whether the same creator is verified.
+     * Policy 13.5 — the documents behind a verification are never returned,
+     * only the fact of it.
+     */
+    const [user, socialVerification, completed, reviews] = await Promise.all([
+        User.findById(profile.user).select('phoneVerified emailVerified createdAt').lean(),
+        Verification.findOne({ subject: profile.user, kind: 'social', status: 'approved' })
+            .select('_id').lean(),
+        /*
+          Previous work, as a count. The titles and the brands behind a
+          creator's past collaborations are the other party's business too, so
+          what a stranger gets is the number — enough to tell a first-timer
+          from someone with a track record, without publishing a client list
+          the brands involved never agreed to.
+        */
+        Deal.countDocuments({ creator: profile.user, state: 'completed' }),
+        Review.find({ target: profile.user, direction: 'brand_to_creator', hidden: { $ne: true } })
+            .select('rating').lean(),
+    ]);
+
+    const rating = reviews.length
+        ? Number((reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(2))
+        : null;
+
+    ok(res, {
+        profile: {
+            ...profile,
+            verification: {
+                identity: Boolean(user?.phoneVerified && user?.emailVerified),
+                social: Boolean(socialVerification),
+            },
+            stats: {
+                completedCollaborations: completed,
+                memberSince: user?.createdAt ?? null,
+                // `null`, not 0 — no reviews is not a rating of zero, and a
+                // zero here would render as the worst creator on the platform.
+                rating,
+                ratingCount: reviews.length,
+            },
+        },
+    });
 });
 /** Bulk export of the current filtered result set (proposal §5.2 — CSV export). */
 export const exportCreators = catchAsync(async (req, res) => {
     const p = req.query;
-    const filter = { isPublished: { $ne: false } };  // Policy 3.3
-    if (p.category)
-        filter.categories = p.category;
-    if (p.availableOnly)
-        filter.availability = true;
+    // The same filter the list uses — see buildCreatorFilter.
+    const filter = buildCreatorFilter(p, await verifiedUserIds(p.verified));
     const items = await CreatorProfile.find(filter).select(PRIVATE_CREATOR_FIELDS).limit(1000).lean();
-    const header = 'displayName,categories,totalAudience,avgEngagement,minRate,country';
-    const rows = items.map((i) => [i.displayName, `"${i.categories.join('|')}"`, i.totalAudience, i.avgEngagement, i.minRate,
-        i.location?.country ?? ''].join(','));
+    const header = 'displayName,categories,languages,totalAudience,avgEngagement,minRate,country';
+    /*
+      Every field quoted and every embedded quote doubled. `displayName` is
+      user-supplied, so a creator called `Verma, Damyanti` used to shift every
+      later column one place left in the downloaded file.
+    */
+    const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = items.map((i) => [
+        cell(i.displayName), cell((i.categories ?? []).join('|')), cell((i.languages ?? []).join('|')),
+        cell(i.totalAudience), cell(i.avgEngagement), cell(i.minRate), cell(i.location?.country),
+    ].join(','));
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="creators.csv"');
     res.send([header, ...rows].join('\n'));

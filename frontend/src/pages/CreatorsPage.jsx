@@ -25,12 +25,47 @@ import { stagger, page as pageMotion, withReducedMotion, usePrefersReducedMotion
  * serves both and they cannot drift apart.
  */
 
-const CATEGORIES = ['Fitness', 'Lifestyle', 'Fashion', 'Beauty', 'Tech', 'Travel', 'Finance', 'Wellness', 'Food', 'Photography'];
-const PLATFORMS = ['instagram', 'youtube', 'linkedin', 'tiktok', 'x', 'facebook', 'pinterest'];
-const LOCATIONS = ['India', 'United States', 'UAE', 'United Kingdom'];
-const PAGE_SIZE = 20;
-const BLANK = { q: '', category: '', platform: '', minFollowers: '', minEngagement: '', location: '', sort: 'relevance' };
+/**
+ * ── The option lists come from the campaign vocabulary ─────────────────────
+ *
+ * Categories and languages used to be a private list in this file, and it had
+ * drifted: discovery offered "Tech", "Wellness" and "Photography", while
+ * creators pick their categories from the campaign vocabulary, where those
+ * three do not exist. So three of the ten filters could only ever return
+ * nothing, and the categories creators actually use — Parenting, Automotive,
+ * Home & Living — could not be filtered for at all.
+ *
+ * Importing the shared lists means a brand searching for creators and a brand
+ * writing a brief are choosing from the same words, which is the whole point of
+ * the two routes being one product.
+ */
+import {
+  CATEGORIES, LANGUAGES, AUDIENCE_AGE_RANGES, GENDERS, LOCATIONS,
+  PLATFORMS as BRIEF_PLATFORMS,
+} from '../components/campaign/vocab';
 
+/**
+ * Discovery searches `socialAccounts.platform`, which holds whatever a creator
+ * connected or declared, so this stays broader than the three platforms a
+ * campaign brief can target.
+ */
+const PLATFORMS = [...new Set([...BRIEF_PLATFORMS, 'linkedin', 'tiktok', 'x', 'pinterest'])];
+/** Audience interests are described in the same words as creator categories. */
+const AUDIENCE_INTERESTS = CATEGORIES;
+const PAGE_SIZE = 20;
+
+const BLANK = {
+  q: '', category: '', platform: '', minFollowers: '', minEngagement: '', location: '',
+  language: '', verified: '', collaborationType: '',
+  audienceLocation: '', audienceAge: '', audienceGender: '', audienceInterest: '',
+  sort: 'relevance',
+};
+
+/**
+ * `options` accepts plain strings, or `{ value, label }` where the two differ —
+ * `verified=identity` has to go to the server as that word, but "Identity
+ * verified" is what a person is choosing.
+ */
 const Select = ({ label, value = '', options = [], onChange, placeholder = 'Any' }) => {
   const id = `f-${label.toLowerCase().replace(/\s/g, '-')}`;
   return (
@@ -39,7 +74,10 @@ const Select = ({ label, value = '', options = [], onChange, placeholder = 'Any'
       <div className="relative">
         <select id={id} value={value} onChange={(e) => onChange?.(e.target.value)} className="field appearance-none pr-8 capitalize">
           <option value="">{placeholder}</option>
-          {options.map((o) => <option key={o} value={o}>{o}</option>)}
+          {options.map((o) => {
+            const v = typeof o === 'string' ? o : o.value;
+            return <option key={v} value={v}>{typeof o === 'string' ? o : o.label}</option>;
+          })}
         </select>
         <ChevDown className="w-4 h-4 absolute right-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
       </div>
@@ -47,29 +85,91 @@ const Select = ({ label, value = '', options = [], onChange, placeholder = 'Any'
   );
 };
 
+/** A labelled group, so the growing filter set stays scannable. */
+const Group = ({ title, note, children }) => (
+  <fieldset className="space-y-3 pt-4 first:pt-0 border-t border-line first:border-0">
+    <legend className="sr-only">{title}</legend>
+    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">{title}</p>
+    {note && <p className="text-[11px] text-muted leading-relaxed -mt-1.5">{note}</p>}
+    {children}
+  </fieldset>
+);
+
 /** One definition, rendered in the sidebar on desktop and the drawer on mobile. */
 function FilterFields({ filters, setF, onApply, onClear }) {
   return (
     <div className="space-y-4">
-      <Select label="Category" value={filters.category} options={CATEGORIES} onChange={(v) => setF('category', v)} />
-      <Select label="Platform" value={filters.platform} options={PLATFORMS} onChange={(v) => setF('platform', v)} />
-      <div>
-        <label htmlFor="f-followers" className="field-label">Followers, minimum</label>
-        <input
-          id="f-followers" type="number" inputMode="numeric" min="0"
-          value={filters.minFollowers} onChange={(e) => setF('minFollowers', e.target.value)}
-          placeholder="10000" className="field tnum"
+      <Group title="The creator">
+        <Select label="Category" value={filters.category} options={CATEGORIES} onChange={(v) => setF('category', v)} />
+        <Select label="Platform" value={filters.platform} options={PLATFORMS} onChange={(v) => setF('platform', v)} />
+        <Select label="Language" value={filters.language} options={LANGUAGES} onChange={(v) => setF('language', v)} />
+        <Select label="Location" value={filters.location} options={LOCATIONS} onChange={(v) => setF('location', v)} />
+        <Select
+          label="Collaboration type"
+          value={filters.collaborationType}
+          options={['paid', 'barter']}
+          onChange={(v) => setF('collaborationType', v)}
         />
-      </div>
-      <div>
-        <label htmlFor="f-eng" className="field-label">Engagement rate, minimum %</label>
-        <input
-          id="f-eng" type="number" inputMode="decimal" min="0" step="0.1"
-          value={filters.minEngagement} onChange={(e) => setF('minEngagement', e.target.value)}
-          placeholder="2" className="field tnum"
+        <Select
+          label="Verification"
+          value={filters.verified}
+          options={[
+            { value: 'any', label: 'Verified — either' },
+            { value: 'identity', label: 'Identity verified' },
+            { value: 'social', label: 'Social verified' },
+          ]}
+          onChange={(v) => setF('verified', v)}
+          placeholder="Any"
         />
-      </div>
-      <Select label="Location" value={filters.location} options={LOCATIONS} onChange={(v) => setF('location', v)} />
+      </Group>
+
+      <Group title="Reach">
+        <div>
+          <label htmlFor="f-followers" className="field-label">Followers, minimum</label>
+          <input
+            id="f-followers" type="number" inputMode="numeric" min="0"
+            value={filters.minFollowers} onChange={(e) => setF('minFollowers', e.target.value)}
+            placeholder="10000" className="field tnum"
+          />
+        </div>
+        <div>
+          <label htmlFor="f-eng" className="field-label">Engagement rate, minimum %</label>
+          <input
+            id="f-eng" type="number" inputMode="decimal" min="0" step="0.1"
+            value={filters.minEngagement} onChange={(e) => setF('minEngagement', e.target.value)}
+            placeholder="2" className="field tnum"
+          />
+        </div>
+      </Group>
+
+      {/*
+        Audience is the creator's own description of who watches them. Saying so
+        here rather than in a tooltip: a brand narrowing a search on this needs
+        to know it is reading a claim, not a measurement, before it filters
+        ninety percent of the platform away on the strength of it.
+      */}
+      <Group
+        title="Their audience"
+        note="Declared by the creator, not measured. Creators who have not filled this in are excluded by these filters."
+      >
+        <Select
+          label="Audience location" value={filters.audienceLocation} options={LOCATIONS}
+          onChange={(v) => setF('audienceLocation', v)}
+        />
+        <Select
+          label="Audience age" value={filters.audienceAge} options={AUDIENCE_AGE_RANGES}
+          onChange={(v) => setF('audienceAge', v)}
+        />
+        <Select
+          label="Audience gender" value={filters.audienceGender} options={GENDERS}
+          onChange={(v) => setF('audienceGender', v)}
+        />
+        <Select
+          label="Audience interest" value={filters.audienceInterest} options={AUDIENCE_INTERESTS}
+          onChange={(v) => setF('audienceInterest', v)}
+        />
+      </Group>
+
       <div className="flex gap-2 pt-1">
         <button onClick={onApply} className="btn-cta flex-1">Apply</button>
         <button onClick={onClear} className="btn-ghost">Clear</button>
@@ -156,7 +256,14 @@ export default function CreatorsPage() {
         initial="hidden" animate="visible"
         className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 flex gap-6"
       >
-        <aside className="w-64 shrink-0 hidden lg:block space-y-4">
+        {/*
+          Sticky and self-scrolling: the filter set is now long enough that a
+          fixed sidebar would scroll off the top of a results page, leaving the
+          brand to scroll back up to change one dropdown.
+        */}
+        <aside className="w-64 shrink-0 hidden lg:block space-y-4 self-start sticky top-4
+                          max-h-[calc(100vh-2rem)] overflow-y-auto no-scrollbar"
+        >
           <div className="card p-4">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-display font-bold text-ink">Filters</h2>

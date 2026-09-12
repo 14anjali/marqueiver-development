@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { api } from '../../../lib/api';
 import { useToast } from '../../../lib/ui-state';
 import { SectionCard, SaveButton, ChipGroup, Toggle } from '../shared';
+import { CATEGORIES, AUDIENCE_AGE_RANGES, GENDERS, LOCATIONS } from '../../campaign/vocab';
 
 /**
  * What work this creator takes, and whether they are taking it now.
@@ -19,11 +20,36 @@ const COLLABORATION_TYPES = [
   { id: 'barter', label: 'Barter / gifting' },
 ];
 
+/**
+ * The four audience facets, and where each one's options come from.
+ *
+ * All four are the same lists the campaign brief uses, because a brand filters
+ * discovery with exactly these words — an audience declared in different words
+ * than the filter offers is an audience no search can find.
+ */
+const AUDIENCE_FACETS = [
+  ['locations', 'Where they are', LOCATIONS, false],
+  ['ageRanges', 'How old they are', AUDIENCE_AGE_RANGES, false],
+  ['genders', 'Mostly', GENDERS, true],
+  ['interests', 'What they are into', CATEGORIES, false],
+];
+
+const EMPTY_AUDIENCE = { locations: [], ageRanges: [], genders: [], interests: [] };
+
+/** Only the four list fields — `declaredAt` is the server's, not the form's. */
+const audienceOf = (profile) => ({
+  ...EMPTY_AUDIENCE,
+  ...Object.fromEntries(
+    Object.entries(profile.audience ?? {}).filter(([k]) => k in EMPTY_AUDIENCE),
+  ),
+});
+
 export default function WorkPreferences({ profile, onSaved }) {
   const [form, setForm] = useState(() => ({
     availability: profile.availability !== false,
     collaborationTypes: profile.collaborationTypes ?? ['paid'],
     contentTypes: profile.contentTypes ?? [],
+    audience: audienceOf(profile),
   }));
   const [saving, setSaving] = useState(false);
   const toast = useToast();
@@ -33,10 +59,22 @@ export default function WorkPreferences({ profile, onSaved }) {
     return { ...f, [key]: list.includes(value) ? list.filter((x) => x !== value) : [...list, value] };
   });
 
+  const toggleAudience = (facet, value) => setForm((f) => {
+    const list = f.audience[facet] ?? [];
+    return {
+      ...f,
+      audience: {
+        ...f.audience,
+        [facet]: list.includes(value) ? list.filter((x) => x !== value) : [...list, value],
+      },
+    };
+  });
+
   const dirty = useMemo(() => (
     form.availability !== (profile.availability !== false)
     || JSON.stringify(form.collaborationTypes) !== JSON.stringify(profile.collaborationTypes ?? ['paid'])
     || JSON.stringify(form.contentTypes) !== JSON.stringify(profile.contentTypes ?? [])
+    || JSON.stringify(form.audience) !== JSON.stringify(audienceOf(profile))
   ), [form, profile]);
 
   async function save() {
@@ -51,6 +89,7 @@ export default function WorkPreferences({ profile, onSaved }) {
         availability: form.availability,
         collaborationTypes: form.collaborationTypes,
         contentTypes: form.contentTypes,
+        audience: form.audience,
       });
       onSaved(data);
       toast.push('Preferences saved', 'success');
@@ -114,6 +153,40 @@ export default function WorkPreferences({ profile, onSaved }) {
             selected={form.contentTypes}
             onToggle={(t) => toggle('contentTypes', t)}
           />
+        </div>
+      </SectionCard>
+
+      {/*
+        ── Who watches you ──────────────────────────────────────────────────
+        Brands filter discovery on this, and nothing on the platform can
+        measure it: Instagram's account insights return reach and engagement,
+        not demographics. So it is the creator's own description, it is labelled
+        that way everywhere it is shown, and it is kept well apart from the
+        follower counts synced from connected accounts (Policy 3.2 / 13.2).
+
+        Leaving it blank is a real choice, not an incomplete profile — so the
+        copy says what it costs rather than nagging.
+      */}
+      <SectionCard
+        title="Who watches you"
+        description="Brands search on this when they are looking for a creator directly. It is shown as your description, never as a measured figure."
+        footer={<SaveButton onClick={save} busy={saving} dirty={dirty} label="Save preferences" />}
+      >
+        <div className="space-y-6">
+          {AUDIENCE_FACETS.map(([facet, label, options, capitalize]) => (
+            <ChipGroup
+              key={facet}
+              label={label}
+              options={options}
+              selected={form.audience[facet] ?? []}
+              onToggle={(v) => toggleAudience(facet, v)}
+              capitalize={capitalize}
+            />
+          ))}
+          <p className="text-xs text-muted leading-relaxed">
+            Optional. Left blank, you simply do not appear when a brand filters by audience —
+            everything else about your profile is unaffected.
+          </p>
         </div>
       </SectionCard>
     </div>

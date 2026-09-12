@@ -62,6 +62,19 @@ export const updateCreatorSchema = z.object({
     collaborationTypes: z.array(z.enum(['paid', 'barter'])).optional(),
     contentTypes: z.array(z.string()).optional(),
     availability: z.boolean().optional(),
+    /**
+     * Creator-declared audience (see CreatorProfile.audience). Same vocabulary
+     * as `Campaign.creatorRequirements.audience`, so brands filter by the words
+     * they brief in. `declaredAt` is not accepted from the client — the server
+     * stamps it, because "when was this last stated" is a fact about the write,
+     * not a value the writer gets to choose.
+     */
+    audience: z.object({
+        locations: z.array(z.string().max(80)).max(20).optional(),
+        ageRanges: z.array(z.string().max(20)).max(10).optional(),
+        genders: z.array(z.string().max(20)).max(5).optional(),
+        interests: z.array(z.string().max(60)).max(20).optional(),
+    }).optional(),
 });
 export const updateCreatorProfile = catchAsync(async (req, res) => {
     if (req.auth.role !== 'creator')
@@ -70,7 +83,14 @@ export const updateCreatorProfile = catchAsync(async (req, res) => {
     const profile = await CreatorProfile.findOne({ user: req.auth.sub });
     if (!profile)
         throw ApiError.notFound();
-    Object.assign(profile, body, body.dob ? { dob: new Date(body.dob) } : {});
+    Object.assign(
+        profile,
+        body,
+        body.dob ? { dob: new Date(body.dob) } : {},
+        // Server-stamped, and only when the creator actually sent an audience —
+        // otherwise every unrelated profile save would restate the declaration.
+        body.audience ? { audience: { ...body.audience, declaredAt: new Date() } } : {},
+    );
     await profile.save(); // pre-save recomputes rollups
 
     /**

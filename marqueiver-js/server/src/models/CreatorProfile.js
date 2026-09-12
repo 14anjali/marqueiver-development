@@ -75,6 +75,35 @@ const creatorSchema = new Schema({
      */
     contactEmail: { type: String, default: '' },
     contactPhone: { type: String, default: '' },
+
+    /**
+     * Who the creator's audience is — declared by the creator, never measured.
+     *
+     * ── Why this is stored rather than derived ─────────────────────────────
+     *
+     * Brands filter discovery by audience, and nothing on the platform can
+     * answer that question today: the Instagram integration's account insights
+     * are reach and engagement metrics (`ACCOUNT_METRICS` in
+     * instagram.service.js), not demographic breakdowns, and no other
+     * integration returns them either. So the choice was to leave the audience
+     * filter unimplemented or to let creators state it. This is the second, and
+     * the vocabulary is copied from `Campaign.creatorRequirements.audience`
+     * rather than invented, so a brand filtering discovery and a brand writing
+     * a brief are choosing from the same words.
+     *
+     * Policy 3.2 / 13.2 governs how it is shown: a declared figure must never
+     * be presented as verified. It sits apart from `socialAccounts` for exactly
+     * the reason `selfReportedMetrics` does, and every surface that renders it
+     * says who said it.
+     */
+    audience: {
+        locations: { type: [String], default: [] },
+        ageRanges: { type: [String], default: [] },
+        genders: { type: [String], default: [] },
+        interests: { type: [String], default: [] },
+        /** Null until the creator fills it in — which is what "where available" means. */
+        declaredAt: { type: Date, default: null },
+    },
     gender: { type: String, enum: ['male', 'female', 'other'] },
     dob: Date,
     location: { city: String, country: { type: String, default: 'India' } },
@@ -124,4 +153,14 @@ creatorSchema.pre('save', function (next) {
     next();
 });
 creatorSchema.index({ categories: 1, availability: 1, totalAudience: -1 });
+
+/**
+ * Discovery filters that are not covered by the rollup index above. Multikey
+ * indexes on the array fields brands actually narrow by — without these,
+ * filtering by language or audience location is a collection scan on every
+ * search, and discovery is the one endpoint a brand hits repeatedly.
+ */
+creatorSchema.index({ languages: 1 });
+creatorSchema.index({ 'audience.locations': 1 });
+creatorSchema.index({ 'audience.interests': 1 });
 export const CreatorProfile = model('CreatorProfile', creatorSchema);

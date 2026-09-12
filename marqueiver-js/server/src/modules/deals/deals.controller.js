@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { Types } from 'mongoose';
 import { catchAsync, ApiError } from '../../utils/apiError.js';
 import { ok, created } from '../../utils/respond.js';
-import { Deal } from '../../models/index.js';
+import { Deal, User, CreatorProfile } from '../../models/index.js';
+import { INCLUDED_REVISIONS } from '../../models/Deal.js';
 import { transitionDeal, listDealsForUser, createPaymentSession } from './deals.service.js';
 import { canRequestRevision, canCancel, REVIEW_WINDOW_DAYS, RESOLUTION_AUTO_DAYS } from './dealStateMachine.js';
 import { brandCancellationOutcome, creatorCancellationOutcome } from '../../services/commission.service.js';
@@ -10,24 +11,121 @@ import * as additionalTerms from './additionalTerms.service.js';
 import { postOffer, acceptOffer, rejectOffer, rejectDeal, confirmTerms } from './negotiation.service.js';
 import { notify, dealPayload } from '../notifications/notifications.service.js';
 import { DEAL_STATES } from '../../../../shared/types.js';
-/** Brand invites a creator (or creator applies) → new deal in `invited`. */
+/**
+ * Route 2's entry point: a brand found a creator in discovery and is sending
+ * them a requirement.
+ *
+ * ── One collaboration workflow, two ways in ────────────────────────────────
+ *
+ * This deliberately creates the same Deal, in the same opening state, running
+ * the same state machine as an application does. The only differences are the
+ * two fields that record how it started:
+ *
+ *   Route 1  creator applies   →  origin 'application', requestedBy 'creator'
+ *   Route 2  brand invites     →  origin 'invite',      requestedBy 'brand'
+ *
+ * Everything after that — negotiation, escrow, submission, revisions,
+ * resolution, release — is shared. `requestedBy` is what makes the handshake
+ * symmetric: `openThread` requires the *receiving* party to accept, so a brand
+ * cannot invite a creator and then negotiate with itself, exactly as a creator
+ * cannot apply and open negotiation without the brand selecting them.
+ *
+ * ── What a requirement now carries ─────────────────────────────────────────
+ *
+ * It used to carry almost nothing. The profile page sent a generated title, the
+ * creator's cheapest rate-card line as the amount and the literal string "To be
+ * agreed during negotiation" as the deliverables, so every direct invitation
+ * arrived identical and said nothing about the work. A creator cannot accept or
+ * decline a brief they cannot read, which is what the brief fields below are
+ * for — and usage rights are part of scope under Policy 8, so they belong in
+ * the requirement rather than being discovered after acceptance.
+ */
 export const createDealSchema = z.object({
     creatorId: z.string(),
-    title: z.string().min(3),
-    contentTypes: z.array(z.string()).default([]),
+    title: z.string().min(3).max(140),
+    contentTypes: z.array(z.string().max(40)).max(10).default([]),
     amount: z.number().min(0),
-    deliverables: z.string().default(''),
+    /**
+     * The brief itself. Required and non-trivial: this is the thing the creator
+     * is being asked to say yes or no to.
+     */
+    deliverables: z.string().min(20).max(4000),
     deadline: z.string().optional(),
-    revisionsAllowed: z.number().min(0).default(1),
-});
+    revisionsAllowed: z.number().min(0).max(10).default(INCLUDED_REVISIONS),
+    /** A note to the creator, alongside the brief. */
+    message: z.string().max(1000).optional(),
+    /** Optional: the campaign this requirement belongs to, for the brand's own records. */
+    campaignId: z.string().optional(),
+    /** Policy 8 — scope, agreed up front rather than assumed afterwards. */
+    usageRights: z.object({
+        licenceType: z.enum(['default', 'extended', 'full_assignment']).optional(),
+        durationMonths: z.number().int().min(1).max(120).optional(),
+        paidAdvertising: z.boolean().optional(),
+        whitelisting: z.boolean().optional(),
+        modificationAllowed: z.boolean().optional(),
+        notes: z.string().max(1000).optional(),
+    }).optional(),
+    exclusivity: z.string().max(500).optional(),
+}).strict();
+
+/** States in which an invitation is still live, so a second one would be noise. */
+const OPEN_DEAL_STATES = DEAL_STATES.filter(
+    (s) => !['declined', 'cancelled', 'completed'].includes(s),
+);
+
 export const createDeal = catchAsync(async (req, res) => {
     if (req.auth.role !== 'brand')
         throw ApiError.forbidden('Only brands can invite');
     const b = req.body;
+
+    /**
+     * The creator was never validated. `creatorId` went straight into the Deal,
+     * so an id belonging to a brand, an admin, a deleted account or nothing at
+     * all created a real collaboration pointing at it — and the resulting deal
+     * could reach escrow with no creator able to act on it.
+     */
+    const creator = await User.findById(b.creatorId).select('role status').lean()
+        .catch(() => null);
+    if (!creator || creator.role !== 'creator')
+        throw ApiError.notFound('Creator not found');
+
+    /*
+      Policy 3.3 — an unpublished creator has withdrawn from discovery. Existing
+      collaborations continue, but they are not open to new approaches.
+    */
+    const profile = await CreatorProfile.findOne({ user: b.creatorId })
+        .select('isPublished displayName').lean();
+    if (!profile)
+        throw ApiError.notFound('Creator not found');
+    if (profile.isPublished === false)
+        throw ApiError.unprocessable('This creator is not currently accepting new requests');
+
+    /**
+     * One live approach at a time. Without this, the confirm button double-firing
+     * — or a brand returning to the profile a week later having forgotten —
+     * produces two collaborations for one piece of work, and the creator has to
+     * guess which one to accept. A finished or declined one does not block a
+     * fresh approach: brands and creators do work together again.
+     */
+    const existing = await Deal.findOne({
+        brand: req.auth.sub,
+        creator: b.creatorId,
+        state: { $in: OPEN_DEAL_STATES },
+    }).select('_id state title').lean();
+    if (existing) {
+        throw ApiError.conflict(
+            `You already have a collaboration open with ${profile.displayName || 'this creator'}. `
+            + 'Continue it rather than starting a second one.',
+            { dealId: String(existing._id), state: existing.state },
+        );
+    }
+
     const deal = await Deal.create({
         brand: req.auth.sub,
         creator: b.creatorId,
         origin: 'invite',
+        requestedBy: 'brand',
+        campaign: b.campaignId || undefined,
         title: b.title,
         contentTypes: b.contentTypes,
         terms: {
@@ -36,16 +134,22 @@ export const createDeal = catchAsync(async (req, res) => {
             deadline: b.deadline ? new Date(b.deadline) : undefined,
             revisionsAllowed: b.revisionsAllowed,
         },
+        ...(b.usageRights ? { usageRights: b.usageRights } : {}),
+        ...(b.exclusivity ? { exclusivity: b.exclusivity } : {}),
         state: 'invitation',
         // Cleared rules §3 — an invitation is NOT the first negotiation offer.
         // Offers can only be posted once the receiving party accepts and the
         // deal reaches `negotiating`.
         offers: [],
-        timeline: [{ from: null, to: 'invitation', by: new Types.ObjectId(req.auth.sub), byRole: 'brand', at: new Date() }],
+        timeline: [{
+            from: null, to: 'invitation', by: new Types.ObjectId(req.auth.sub),
+            byRole: 'brand', at: new Date(),
+            ...(b.message ? { note: b.message } : {}),
+        }],
     });
     await notify({
-        user: b.creatorId, type: 'deal.invited', title: 'New campaign invite',
-        body: `You've been invited to "${b.title}".`, data: dealPayload(deal),
+        user: b.creatorId, type: 'deal.invited', title: 'New collaboration request',
+        body: `You've been asked to work on "${b.title}".`, data: dealPayload(deal),
     }).catch(() => void 0);
     created(res, deal);
 });
