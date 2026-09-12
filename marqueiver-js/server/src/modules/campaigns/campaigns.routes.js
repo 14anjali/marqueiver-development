@@ -18,7 +18,11 @@ router.patch('/:id', validate(c.updateCampaignSchema), c.updateCampaign);
 // Draft/rejected → back into the review queue. Distinct from PATCH so that
 // saving an edit does not re-enter the queue on every keystroke.
 router.post('/:id/submit', c.submitCampaignForReview);
-router.post('/:id/apply', c.applyToCampaign);
+// The application itself is validated here; the checks that need the campaign
+// (required questions, choice options, whether a price may be proposed) run in
+// the handler, which is the only place that holds it.
+router.post('/:id/apply', validate(c.applicationSchema), c.applyToCampaign);
+router.post('/:id/withdraw', validate(c.withdrawApplicationSchema), c.withdrawApplication);
 router.get('/:id/applicants', c.listApplicants);
 router.patch('/:id/applicants/:creatorId', validate(c.decideApplicantSchema), c.decideApplicant);
 

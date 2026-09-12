@@ -2,11 +2,21 @@ import { z } from 'zod';
 import { catchAsync, ApiError } from '../../utils/apiError.js';
 import { ok, created } from '../../utils/respond.js';
 import { Campaign, CreatorProfile, Deal, User, Verification } from '../../models/index.js';
-import { CREATOR_VISIBLE_STATUSES, CAMPAIGN_EDITABLE_STATUSES } from '../../models/Campaign.js';
+import {
+    CREATOR_VISIBLE_STATUSES, CAMPAIGN_EDITABLE_STATUSES,
+    BRAND_DECISION_STATUSES, TERMINAL_APPLICATION_STATUSES,
+    normaliseApplicationStatus,
+} from '../../models/Campaign.js';
 import {
     briefSchema, draftIssues, publishReadiness, deriveContentTypes,
 } from './campaignBrief.schema.js';
 import { brandSummariesFor, brandSummaryFor } from './brandSummary.service.js';
+import {
+    applicationSchema, validateAgainstCampaign, pruneAnswers,
+} from './application.schema.js';
+
+/** Re-exported so `campaigns.routes.js` wires validation from one module. */
+export { applicationSchema };
 import { creatorEligibility, applicationWindow } from './campaignEligibility.service.js';
 import { INCLUDED_REVISIONS } from '../../models/Deal.js';
 import { notify } from '../notifications/notifications.service.js';
@@ -279,7 +289,7 @@ export const listCampaigns = catchAsync(async (req, res) => {
         const { applicants, review, ...rest } = c;
         return {
             ...rest,
-            myApplication: mine,
+            myApplication: mine ? shapeApplication(mine) : null,
             brandSummary: summaries.get(String(c.brand)) ?? null,
             applicationWindow: applicationWindow(c),
         };
@@ -340,8 +350,10 @@ export const listMyApplications = catchAsync(async (req, res) => {
 
     const items = campaigns.map((c) => {
         const mine = c.applicants.find((a) => a.creator.toString() === req.auth.sub);
-        const { applicants, ...rest } = c;
-        return { ...rest, myApplication: mine };
+        // `review` is Marqueiver's correspondence with the brand, not the
+        // creator's — the same rule getCampaign applies.
+        const { applicants, review, ...rest } = c;
+        return { ...rest, myApplication: mine ? shapeApplication(mine) : null };
     });
     ok(res, items);
 });
@@ -372,7 +384,7 @@ export const getCampaign = catchAsync(async (req, res) => {
 
         const mine = campaign.applicants?.find((a) => a.creator.toString() === req.auth.sub) ?? null;
         delete campaign.applicants;
-        campaign.myApplication = mine;
+        campaign.myApplication = mine ? shapeApplication(mine) : null;
         campaign.applicantCount = undefined;
         // Review notes are between the brand and Marqueiver.
         delete campaign.review;
@@ -499,9 +511,26 @@ export const applyToCampaign = catchAsync(async (req, res) => {
         throw ApiError.notFound('Campaign not found');
     }
 
+    /**
+     * One application per creator per campaign, withdrawn ones included.
+     *
+     * A withdrawal is a decision the brand may already have seen, so letting a
+     * creator withdraw and re-apply would be a way to erase it. The message
+     * says which case this is, because "you have already applied" is confusing
+     * to someone who remembers withdrawing.
+     */
     const existing = campaign.applicants.find((a) => a.creator.toString() === req.auth.sub);
-    if (existing)
-        throw new ApiError(409, 'ALREADY_APPLIED', 'You have already applied to this campaign');
+    if (existing) {
+        throw new ApiError(409, 'ALREADY_APPLIED',
+            normaliseApplicationStatus(existing.status) === 'withdrawn'
+                ? 'You withdrew from this campaign. An application cannot be sent again.'
+                : 'You have already applied to this campaign');
+    }
+
+    // Shape and cross-field checks that need the campaign itself: which
+    // questions exist, which are required, and whether a price may be proposed.
+    const problems = validateAgainstCampaign(req.body ?? {}, campaign);
+    if (problems.length) throw ApiError.unprocessable(problems[0], { problems });
 
     // The deal that this application produces. Terms come from the campaign
     // budget as the opening position; nothing is agreed until an offer is
@@ -545,7 +574,27 @@ export const applyToCampaign = catchAsync(async (req, res) => {
         }],
     });
 
-    campaign.applicants.push({ creator: req.auth.sub, status: 'pending', deal: deal._id });
+    const body = req.body ?? {};
+    campaign.applicants.push({
+        creator: req.auth.sub,
+        status: 'applied',
+        deal: deal._id,
+        submission: {
+            pitch: body.pitch ?? '',
+            // Only kept when the campaign takes one — validation has already
+            // refused a price on a fixed-fee campaign, so this is the shape
+            // guard rather than the rule.
+            proposedPrice: campaign.commercials?.allowProposedPrice === false
+                ? null
+                : (body.proposedPrice ?? null),
+            portfolioLinks: body.portfolioLinks ?? [],
+            attachments: body.attachments ?? [],
+            answers: pruneAnswers(body.answers, campaign),
+        },
+        history: [{
+            status: 'applied', at: new Date(), by: req.auth.sub, byRole: 'creator',
+        }],
+    });
 
     try {
         await campaign.save();
@@ -565,10 +614,8 @@ export const applyToCampaign = catchAsync(async (req, res) => {
         data: { campaignId: campaign.id, dealId: deal.id },
     }).catch(() => void 0);
 
-    created(res, {
-        applied: true,
-        application: { status: 'pending', deal: deal._id, appliedAt: new Date() },
-    });
+    const saved = campaign.applicants[campaign.applicants.length - 1];
+    created(res, { applied: true, application: shapeApplication(saved) });
 });
 
 /**
@@ -582,7 +629,29 @@ export const applyToCampaign = catchAsync(async (req, res) => {
  *
  * Rejecting closes the deal as `rejected` (distinct from `cancelled`, §1/§6).
  */
-export const decideApplicantSchema = z.object({ status: z.enum(['accepted', 'rejected']) });
+/**
+ * The brand moves an application along.
+ *
+ * Four destinations, and only two of them touch the Deal:
+ *
+ *  - `under_review` and `shortlisted` are the brand saying where a creator
+ *    stands. The deal stays exactly where it is, because nothing has been
+ *    agreed — these exist so "we are looking at it" is a thing a creator can
+ *    be told rather than something they have to infer from silence.
+ *  - `selected` is the receiving party accepting the requested deal (§2/§3):
+ *    it moves the deal to `negotiation` and opens the thread, which is what
+ *    `accepted` did before and still does under its old name.
+ *  - `rejected` declines the deal.
+ *
+ * `accepted` is still accepted as an input spelling so an older client, or a
+ * request written against the previous API, keeps working.
+ */
+export const decideApplicantSchema = z.object({
+    status: z.enum([...BRAND_DECISION_STATUSES, 'accepted']),
+    /** Shown to the creator on their status timeline, verbatim. */
+    message: z.string().trim().max(500).optional(),
+});
+
 export const decideApplicant = catchAsync(async (req, res) => {
     const campaign = await Campaign.findById(req.params.id);
     if (!campaign) throw ApiError.notFound('Campaign not found');
@@ -590,43 +659,159 @@ export const decideApplicant = catchAsync(async (req, res) => {
 
     const applicant = campaign.applicants.find((a) => a.creator.toString() === req.params.creatorId);
     if (!applicant) throw ApiError.notFound('Applicant not found');
-    if (applicant.status !== 'pending')
-        throw ApiError.unprocessable(`This application is already ${applicant.status}`);
 
-    applicant.status = req.body.status;
-    applicant.decidedAt = new Date();
+    const current = normaliseApplicationStatus(applicant.status);
+    const next = req.body.status === 'accepted' ? 'selected' : req.body.status;
+
+    /**
+     * A finished application does not move again.
+     *
+     * `selected` and `rejected` have already moved the Deal, and `withdrawn` is
+     * the creator's decision — a brand overriding it would be deciding on
+     * behalf of someone who has left.
+     */
+    if (TERMINAL_APPLICATION_STATUSES.includes(current)) {
+        throw ApiError.unprocessable(
+            current === 'withdrawn'
+                ? 'This creator withdrew their application.'
+                : `This application is already ${current.replace('_', ' ')}.`,
+        );
+    }
+    if (current === next) {
+        throw ApiError.unprocessable(`This application is already ${next.replace('_', ' ')}.`);
+    }
+
+    applicant.status = next;
+    if (TERMINAL_APPLICATION_STATUSES.includes(next)) applicant.decidedAt = new Date();
+    applicant.history.push({
+        status: next,
+        at: new Date(),
+        by: req.auth.sub,
+        byRole: 'brand',
+        message: req.body.message ?? '',
+    });
     await campaign.save();
 
     let deal = applicant.deal ? await Deal.findById(applicant.deal) : null;
 
-    if (deal) {
-        if (req.body.status === 'accepted') {
-            // Receiving party accepts → negotiation opens (§3).
-            deal = await transitionDeal({
-                dealId: deal.id, to: 'negotiation', actor: 'brand', actorId: req.auth.sub,
-                note: `Application accepted for "${campaign.title}"`,
-            });
-            await openThread({ deal, actorId: req.auth.sub, actorRole: 'brand' });
-        } else {
-            deal = await transitionDeal({
-                dealId: deal.id, to: 'declined', actor: 'brand', actorId: req.auth.sub,
-                note: `Application rejected for "${campaign.title}"`,
-            });
-        }
+    // Only the two terminal decisions are deal transitions. A shortlist is not
+    // an agreement, and moving the deal on one would let a brand skip §3.
+    if (deal && next === 'selected') {
+        deal = await transitionDeal({
+            dealId: deal.id, to: 'negotiation', actor: 'brand', actorId: req.auth.sub,
+            note: `Application selected for "${campaign.title}"`,
+        });
+        await openThread({ deal, actorId: req.auth.sub, actorRole: 'brand' });
+    } else if (deal && next === 'rejected') {
+        deal = await transitionDeal({
+            dealId: deal.id, to: 'declined', actor: 'brand', actorId: req.auth.sub,
+            note: `Application rejected for "${campaign.title}"`,
+        });
     }
+
+    const NOTICE = {
+        under_review: {
+            title: 'Your application is being reviewed',
+            body: `"${campaign.title}" — the brand is looking at your application.`,
+        },
+        shortlisted: {
+            title: 'You have been shortlisted',
+            body: `"${campaign.title}" — you are on the brand's shortlist.`,
+        },
+        selected: {
+            title: 'You have been selected',
+            body: `Your application to "${campaign.title}" was selected. Negotiation is open — send or review an offer.`,
+        },
+        rejected: {
+            title: 'Application update',
+            body: `Your application to "${campaign.title}" was not taken forward.`,
+        },
+    }[next];
 
     await notify({
         user: req.params.creatorId,
-        type: `campaign.${req.body.status}`,
-        title: req.body.status === 'accepted' ? 'Application accepted' : 'Application update',
-        body: req.body.status === 'accepted'
-            ? `Your application to "${campaign.title}" was accepted. Negotiation is open — send or review an offer.`
-            : `Your application to "${campaign.title}" was not taken forward.`,
+        type: `campaign.${next}`,
+        title: NOTICE.title,
+        body: req.body.message ? `${NOTICE.body} ${req.body.message}` : NOTICE.body,
         data: { campaignId: campaign.id, dealId: deal?.id },
     }).catch(() => void 0);
 
     ok(res, { campaign, deal });
 });
+
+/**
+ * A creator withdraws.
+ *
+ * Allowed until the application is decided: once a brand has selected or
+ * rejected it, the deal has moved and withdrawing would leave the two
+ * disagreeing. The produced deal is declined by the creator, which the state
+ * machine already permits from `invitation` and `negotiation`.
+ *
+ * The row is kept rather than deleted. A withdrawal the brand already saw is
+ * part of the record, and deleting it would let a creator withdraw and
+ * re-apply to erase it.
+ */
+export const withdrawApplicationSchema = z.object({
+    reason: z.string().trim().max(500).optional(),
+});
+
+export const withdrawApplication = catchAsync(async (req, res) => {
+    if (req.auth.role !== 'creator') throw ApiError.forbidden('Creators only');
+
+    const campaign = await Campaign.findById(req.params.id);
+    if (!campaign) throw ApiError.notFound('Campaign not found');
+
+    const applicant = campaign.applicants.find((a) => a.creator.toString() === req.auth.sub);
+    if (!applicant) throw ApiError.notFound('You have not applied to this campaign');
+
+    const current = normaliseApplicationStatus(applicant.status);
+    if (TERMINAL_APPLICATION_STATUSES.includes(current)) {
+        throw ApiError.unprocessable(
+            current === 'withdrawn'
+                ? 'You have already withdrawn this application.'
+                : `This application has already been ${current}. Speak to the brand instead.`,
+        );
+    }
+
+    applicant.status = 'withdrawn';
+    applicant.withdrawnAt = new Date();
+    applicant.history.push({
+        status: 'withdrawn',
+        at: new Date(),
+        by: req.auth.sub,
+        byRole: 'creator',
+        message: req.body?.reason ?? '',
+    });
+    await campaign.save();
+
+    let deal = applicant.deal ? await Deal.findById(applicant.deal) : null;
+    if (deal && ['invitation', 'negotiation'].includes(deal.state)) {
+        deal = await transitionDeal({
+            dealId: deal.id, to: 'declined', actor: 'creator', actorId: req.auth.sub,
+            note: `Application withdrawn for "${campaign.title}"`,
+        });
+    }
+
+    await notify({
+        user: campaign.brand.toString(),
+        type: 'campaign.withdrawn',
+        title: 'An applicant withdrew',
+        body: `A creator withdrew their application to "${campaign.title}".`,
+        data: { campaignId: campaign.id, dealId: deal?.id },
+    }).catch(() => void 0);
+
+    ok(res, { withdrawn: true, application: shapeApplication(applicant) });
+});
+
+/** One application, in the shape the creator's tracker renders. */
+function shapeApplication(applicant) {
+    const raw = applicant.toObject ? applicant.toObject() : applicant;
+    return {
+        ...raw,
+        status: normaliseApplicationStatus(raw.status),
+        history: (raw.history ?? []).map((h) => ({ ...h, status: normaliseApplicationStatus(h.status) })),
+    };
+}
 
 /** Applicant list with creator display info, for the owning brand's UI. */
 export const listApplicants = catchAsync(async (req, res) => {
@@ -637,6 +822,9 @@ export const listApplicants = catchAsync(async (req, res) => {
     const profiles = await CreatorProfile.find({ user: { $in: creatorIds } })
         .select('user displayName headline totalAudience avgEngagement location').lean();
     const byUser = new Map(profiles.map((p) => [String(p.user), p]));
-    const enriched = campaign.applicants.map((a) => ({ ...a, profile: byUser.get(String(a.creator)) || null }));
+    const enriched = campaign.applicants.map((a) => ({
+        ...shapeApplication(a),
+        profile: byUser.get(String(a.creator)) || null,
+    }));
     ok(res, enriched);
 });

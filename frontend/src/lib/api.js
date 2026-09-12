@@ -491,11 +491,25 @@ export const api = {
   /** Campaign and product imagery, through the existing upload-url endpoint. */
   campaignUploadUrl: (fileName, contentType) =>
     req('/api/users/me/logo-upload-url', { method: 'POST', body: { fileName, contentType, purpose: 'campaign' } }),
-  applyToCampaign: (id) => req(`/api/campaigns/${id}/apply`, { method: 'POST' }),
+  /**
+   * Apply, with the application itself. The body is validated server-side
+   * against the campaign's own questions, so an answer to a question that has
+   * since changed is refused rather than stored.
+   */
+  applyToCampaign: (id, application) =>
+    req(`/api/campaigns/${id}/apply`, { method: 'POST', body: application }),
+  withdrawApplication: (id, reason) =>
+    req(`/api/campaigns/${id}/withdraw`, { method: 'POST', body: reason ? { reason } : {} }),
+  myApplications: () => req('/api/campaigns/applied'),
+  applicationUploadUrl: (fileName, contentType) =>
+    req('/api/users/me/logo-upload-url', { method: 'POST', body: { fileName, contentType, purpose: 'application' } }),
   listCampaignApplicants: (id) => req(`/api/campaigns/${id}/applicants`),
   // §10 — campaigns this creator has applied to, with status from the server.
   listMyApplications: () => req('/api/campaigns/applied'),
-  decideApplicant: (id, creatorId, status) => req(`/api/campaigns/${id}/applicants/${creatorId}`, { method: 'PATCH', body: { status } }),
+  decideApplicant: (id, creatorId, status, message) =>
+    req(`/api/campaigns/${id}/applicants/${creatorId}`, {
+      method: 'PATCH', body: { status, ...(message ? { message } : {}) },
+    }),
 
   // Wallet (internal ledger; real money only via Cashfree at withdrawal)
   getWallet: () => req('/api/wallet'),

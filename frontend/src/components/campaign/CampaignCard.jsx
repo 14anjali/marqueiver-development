@@ -2,9 +2,9 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Money, StatusPill } from '../feedback';
 import { MapPin, ShieldCheck, Image as ImageIcon } from '../icons';
-import { Spinner } from '../../lib/ui-state';
 import { rise, withReducedMotion, usePrefersReducedMotion } from '../../lib/motion';
 import { PLATFORM_LABEL } from './vocab';
+import { statusMeta } from './applicationStatus';
 
 /**
  * One campaign in the browse grid.
@@ -42,7 +42,7 @@ function deadlineLabel(iso, now = Date.now()) {
   return { text: `Apply by ${dateOf(iso)}`, tone: 'muted' };
 }
 
-export default function CampaignCard({ campaign: c, onApply, applying, showStatus = false }) {
+export default function CampaignCard({ campaign: c, showStatus = false }) {
   const reduced = usePrefersReducedMotion();
 
   const brand = c.brandSummary;
@@ -141,30 +141,30 @@ export default function CampaignCard({ campaign: c, onApply, applying, showStatu
           </p>
         )}
 
-        {/* ── the CTA ── */}
+        {/*
+          ── the CTA ──
+
+          Apply is a link to the campaign, not a button that posts from here.
+          An application now carries a pitch, portfolio links and answers to the
+          brand's questions, so there is nothing sensible to send from a card —
+          and a one-click apply would produce exactly the empty application the
+          form exists to prevent.
+        */}
         <div className="mt-3">
           {applied ? (
-            <div className="w-full text-center text-sm font-semibold rounded-lg py-2.5 bg-brand-50 text-brand-700">
-              {c.myApplication.status === 'accepted' ? 'Accepted'
-                : c.myApplication.status === 'rejected' ? 'Not selected'
-                  : 'Applied'}
-            </div>
-          ) : onApply ? (
-            <div className="flex gap-2">
-              <Link to={`/campaigns/${c._id}`} className="btn-ghost text-sm flex-1 justify-center">
-                Details
-              </Link>
-              <button
-                onClick={() => onApply(c._id)}
-                disabled={applying || closed}
-                className="btn-brand text-sm flex-1 justify-center disabled:opacity-40"
-              >
-                {applying ? <Spinner className="w-4 h-4" /> : closed ? 'Closed' : 'Apply'}
-              </button>
-            </div>
+            <Link
+              to={`/campaigns/${c._id}`}
+              className="block w-full text-center text-sm font-semibold rounded-lg py-2.5
+                         bg-brand-50 text-brand-700 hover:bg-brand-100 transition-colors focusable"
+            >
+              {statusMeta(c.myApplication.status).label}
+            </Link>
           ) : (
-            <Link to={`/campaigns/${c._id}`} className="btn-outline w-full text-sm justify-center">
-              View campaign
+            <Link
+              to={`/campaigns/${c._id}`}
+              className={`w-full text-sm justify-center ${closed ? 'btn-ghost' : 'btn-brand'}`}
+            >
+              {closed ? 'View campaign' : 'View and apply'}
             </Link>
           )}
         </div>

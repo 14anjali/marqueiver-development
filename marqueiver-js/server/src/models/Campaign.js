@@ -9,13 +9,124 @@ import { Schema, model } from 'mongoose';
  * row is not a standalone concept; it points at the Deal it produced, and the
  * brand's Accept moves that deal on rather than just flipping a string.
  */
+/**
+ * What a creator actually sent.
+ *
+ * Stored on the application rather than in its own collection: it is read in
+ * exactly one place — the brand looking at this campaign's applicants — and it
+ * is written once. A separate collection would buy a join and nothing else.
+ *
+ * Nothing here reaches the Deal. `terms.amount` comes from `campaign.budget`,
+ * and `proposedPrice` is what the creator would like, shown to the brand and
+ * settled in negotiation. Letting an application set the deal's price would be
+ * negotiation, which is deliberately not part of this.
+ */
+const submissionSchema = new Schema({
+    /** "Why are you the right creator?" — the body of the application. */
+    pitch: { type: String, default: '', maxlength: 2000 },
+    /**
+     * Optional, and only when the campaign allows it. A number the brand reads,
+     * never a number the escrow is funded from.
+     */
+    proposedPrice: { type: Number, default: null },
+    /** Links to work that is already public. */
+    portfolioLinks: { type: [String], default: [] },
+    /**
+     * Files the creator attached, through the same signed-upload flow as every
+     * other upload in the product. `kind` is what the browser reported, kept so
+     * the brand's list can show a video differently from a PDF.
+     */
+    attachments: {
+        type: [new Schema({
+            url: { type: String, required: true },
+            name: { type: String, default: '' },
+            kind: { type: String, default: '' },
+        }, { _id: false })],
+        default: [],
+    },
+    /**
+     * Answers to the campaign's own questions, keyed by the question's stable
+     * `key` so rewording a prompt does not orphan the answers already given.
+     */
+    answers: {
+        type: [new Schema({
+            key: { type: String, required: true },
+            /** Free text, a link, a number as text, or the chosen option(s). */
+            value: { type: String, default: '' },
+            values: { type: [String], default: [] },
+        }, { _id: false })],
+        default: [],
+    },
+}, { _id: false });
+
+/**
+ * The status vocabulary, and why two of these look redundant.
+ *
+ * `applied → under_review → shortlisted → selected/rejected`, plus `withdrawn`
+ * for a creator who pulls out. Only `selected` and `rejected` touch the Deal
+ * the application produced; the two middle states are the brand telling a
+ * creator where they stand, which is the whole reason a creator asks.
+ *
+ * `pending` and `accepted` are the original two values. They are kept in the
+ * enum because mongoose validates on write, not on read: a campaign that still
+ * holds an old `pending` applicant would fail to save — including when a new
+ * creator applies to it — the moment those values stopped being legal.
+ * `utils/migrate-application-statuses.js` normalises them; until it has run
+ * everywhere, both spellings are accepted and `normaliseStatus` below maps them.
+ */
+export const APPLICATION_STATUSES = [
+    'applied', 'under_review', 'shortlisted', 'selected', 'rejected', 'withdrawn',
+];
+
+/** Historical values. Written by nothing; still readable. */
+export const LEGACY_APPLICATION_STATUSES = ['pending', 'accepted'];
+
+const LEGACY_MAP = { pending: 'applied', accepted: 'selected' };
+
+/** One current status, whichever spelling is on the document. */
+export function normaliseApplicationStatus(status) {
+    return LEGACY_MAP[status] ?? status;
+}
+
+/** The statuses a brand may set. A creator withdraws; nobody re-applies. */
+export const BRAND_DECISION_STATUSES = ['under_review', 'shortlisted', 'selected', 'rejected'];
+
+/** Once here, the application is over — the deal has moved and cannot un-move. */
+export const TERMINAL_APPLICATION_STATUSES = ['selected', 'rejected', 'withdrawn'];
+
 const applicantSchema = new Schema({
     creator: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     appliedAt: { type: Date, default: Date.now },
-    status: { type: String, enum: ['pending', 'accepted', 'rejected'], default: 'pending' },
+    status: {
+        type: String,
+        enum: [...APPLICATION_STATUSES, ...LEGACY_APPLICATION_STATUSES],
+        default: 'applied',
+    },
     /** The `requested` deal created when this application was submitted (§2). */
     deal: { type: Schema.Types.ObjectId, ref: 'Deal' },
     decidedAt: Date,
+    withdrawnAt: Date,
+
+    submission: { type: submissionSchema, default: () => ({}) },
+
+    /**
+     * Every status this application has been in, and when.
+     *
+     * A creator asking "where is my application" is asking for exactly this,
+     * and a single mutable `status` field cannot answer it: it says where the
+     * application is now and nothing about whether it has moved at all. The
+     * optional message is what the brand chose to say at that step.
+     */
+    history: {
+        type: [new Schema({
+            status: { type: String, required: true },
+            at: { type: Date, default: Date.now },
+            by: { type: Schema.Types.ObjectId, ref: 'User' },
+            byRole: { type: String, enum: ['creator', 'brand', 'admin'] },
+            message: { type: String, default: '', maxlength: 500 },
+        }, { _id: false })],
+        default: [],
+    },
 }, { _id: false });
 
 /**
@@ -50,11 +161,12 @@ const deliverableSchema = new Schema({
  * Stored with the campaign rather than as its own collection: the questions are
  * part of the brief, they are versioned with it, and nothing else refers to
  * them. `key` is a stable identifier so an answer can be matched to its
- * question even after the prompt is reworded.
+ * question even after the prompt is reworded — which is exactly what
+ * `submission.answers` does.
  *
- * Nothing reads these yet — applications are explicitly out of scope for this
- * feature. They are captured here so the brief is complete when the answering
- * side is built.
+ * `required` is enforced at the API boundary in `application.schema.js`, not
+ * here: mongoose cannot express "required, but only if the campaign this
+ * subdocument does not know about asked for it".
  */
 const campaignQuestionSchema = new Schema({
     key: { type: String, required: true },
@@ -163,6 +275,18 @@ const campaignSchema = new Schema({
          * path, because there is only one.
          */
         paymentModel: { type: String, default: 'fixed' },
+        /**
+         * May a creator name their own price when applying?
+         *
+         * Default `true`, which matches how the brief already reads to a
+         * creator — the deliverables list is there so they can price the work.
+         * A brand that wants applications at its stated fee and nothing else
+         * turns this off, and the application form then hides the field.
+         *
+         * Whatever a creator proposes is a number the brand reads. It never
+         * becomes the deal's `terms.amount`; that is negotiation.
+         */
+        allowProposedPrice: { type: Boolean, default: true },
         product: {
             offered: { type: Boolean, default: false },
             description: { type: String, default: '' },

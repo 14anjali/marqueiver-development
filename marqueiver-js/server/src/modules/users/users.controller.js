@@ -285,7 +285,7 @@ export const getUploadUrlSchema = z.object({
     // Previously this endpoint was hard-restricted to brands only (for the
     // logo use case), which silently broke it for creator Portfolio uploads
     // (PortfolioPage.jsx calls this same endpoint) — fixed to be role-agnostic.
-    purpose: z.enum(['brand-logo', 'portfolio', 'verification', 'avatar', 'banner', 'campaign']).default('portfolio'),
+    purpose: z.enum(['brand-logo', 'portfolio', 'verification', 'avatar', 'banner', 'campaign', 'application']).default('portfolio'),
 });
 export const getLogoUploadUrl = catchAsync(async (req, res) => {
     const { fileName, contentType, purpose } = req.body;
@@ -297,6 +297,7 @@ export const getLogoUploadUrl = catchAsync(async (req, res) => {
         : purpose === 'avatar' ? 'avatars'
         : purpose === 'banner' ? 'banners'
         : purpose === 'campaign' ? 'campaign-assets'
+        : purpose === 'application' ? 'applications'
         : 'portfolio';
     const key = `${folder}/${req.auth.sub}/${Date.now()}-${fileName}`;
     const urls = await getUploadUrl(key, contentType);

@@ -127,7 +127,6 @@ export default function CampaignsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [applicantsFor, setApplicantsFor] = useState(null);
-  const [applyingId, setApplyingId] = useState(null);
   const [submittingId, setSubmittingId] = useState(null);
   const [filter, setFilter] = useState('all');
 
@@ -161,24 +160,6 @@ export default function CampaignsPage() {
     return () => clearTimeout(debounce.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, isBrand]);
-
-  /**
-   * Application state comes from the server (`myApplication` on each campaign),
-   * never from local state — that was the original bug: a refresh wiped the Set
-   * and the Apply button came back even though the application existed.
-   */
-  async function apply(campaignId) {
-    setApplyingId(campaignId);
-    try {
-      const { data } = await api.applyToCampaign(campaignId);
-      setCampaigns((list) => list.map((c) =>
-        (c._id === campaignId ? { ...c, myApplication: data.application } : c)));
-      toast.push('Application sent', 'success');
-    } catch (e) {
-      if (/already applied/i.test(e.message)) load(cleanParams(applied));
-      toast.push(e.message, 'error');
-    } finally { setApplyingId(null); }
-  }
 
   /** Put a draft or rejected campaign back into the review queue. */
   async function submitForReview(campaignId) {
@@ -274,12 +255,7 @@ export default function CampaignsPage() {
             onApplicants={() => setApplicantsFor(c)}
           />
         ) : (
-          <CampaignCard
-            key={c._id}
-            campaign={c}
-            onApply={apply}
-            applying={applyingId === c._id}
-          />
+          <CampaignCard key={c._id} campaign={c} />
         )))}
       </div>
 

@@ -2,11 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import AppPage from '../components/AppPage';
 import CampaignBrief from '../components/campaign/CampaignBrief';
+import ApplicationForm from '../components/campaign/ApplicationForm';
+import ApplicationStatus from '../components/campaign/ApplicationStatus';
 import { StatusPill } from '../components/feedback';
 import { Check, X, ShieldCheck, ChevDown } from '../components/icons';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { Spinner, useToast } from '../lib/ui-state';
+import { useToast } from '../lib/ui-state';
 
 /**
  * One campaign, in full, for the creator deciding whether to apply.
@@ -25,11 +27,15 @@ import { Spinner, useToast } from '../lib/ui-state';
  * may be exactly who they want. So a missed check explains and links to the
  * screen that fixes it; it does not lock the button.
  *
- * ── What this page does not do ─────────────────────────────────────────────
+ * ── Three states, one page ─────────────────────────────────────────────────
  *
- * There is no application form here. Apply is the existing
- * `POST /api/campaigns/:id/apply` that the listing already used, untouched —
- * the form itself is a separate piece of work.
+ * Not applied → the eligibility panel and an Apply button. Applying → the form,
+ * in place rather than in a modal, because it is long enough that a creator
+ * will want to scroll back into the brief while writing it. Applied → the
+ * status tracker, with what they sent and where it has got to.
+ *
+ * Negotiation is deliberately absent. A selected application links to its deal
+ * and stops there; pricing and terms are settled in that flow, not this one.
  */
 
 /** Where a creator goes to fix each kind of unmet requirement. */
@@ -47,7 +53,8 @@ export default function CampaignDetailPage() {
   const [campaign, setCampaign] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [applying, setApplying] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
 
   const isBrand = user?.role === 'brand';
 
@@ -66,19 +73,24 @@ export default function CampaignDetailPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  async function apply() {
-    setApplying(true);
+  /** The form posts the application itself and hands back what was stored. */
+  function onSubmitted(application) {
+    setCampaign((c) => ({ ...c, myApplication: application }));
+    setFormOpen(false);
+    toast.push('Application sent', 'success');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function withdraw() {
+    setWithdrawing(true);
     try {
-      const { data } = await api.applyToCampaign(id);
+      const { data } = await api.withdrawApplication(id);
       setCampaign((c) => ({ ...c, myApplication: data.application }));
-      toast.push('Application sent', 'success');
+      toast.push('Application withdrawn', 'success');
     } catch (e) {
-      // An "already applied" answer means our copy is stale, not that the
-      // creator did something wrong — reload rather than just complaining.
-      if (/already applied/i.test(e.message)) load();
       toast.push(e.message, 'error');
     } finally {
-      setApplying(false);
+      setWithdrawing(false);
     }
   }
 
@@ -106,15 +118,30 @@ export default function CampaignDetailPage() {
       width="max-w-[880px]"
     >
       <div className="space-y-5">
-        {/* ── can I apply? ── */}
-        {!isBrand && (
-          <ApplyPanel
-            applied={applied}
+        {/* ── applied: where it stands ── */}
+        {!isBrand && applied && (
+          <ApplicationStatus
             application={c.myApplication}
+            campaign={c}
+            onWithdraw={withdraw}
+            withdrawing={withdrawing}
+          />
+        )}
+
+        {/* ── not applied: can I, and then the form ── */}
+        {!isBrand && !applied && !formOpen && (
+          <ApplyPanel
             window={appWindow}
             eligibility={eligibility}
-            busy={applying}
-            onApply={apply}
+            onApply={() => setFormOpen(true)}
+          />
+        )}
+
+        {!isBrand && !applied && formOpen && (
+          <ApplicationForm
+            campaign={c}
+            onSubmitted={onSubmitted}
+            onCancel={() => setFormOpen(false)}
           />
         )}
 
@@ -137,10 +164,13 @@ export default function CampaignDetailPage() {
 }
 
 /**
- * The decision panel: whether applications are open, how this creator matches,
- * and the one button.
+ * The decision panel, shown before a creator applies.
+ *
+ * It answers one question — should I spend an hour on this — and then gets out
+ * of the way: once the form is open or the application is sent, the page shows
+ * those instead.
  */
-function ApplyPanel({ applied, application, window: appWindow, eligibility, busy, onApply }) {
+function ApplyPanel({ window: appWindow, eligibility, onApply }) {
   const closed = appWindow.open === false;
 
   return (
@@ -149,55 +179,27 @@ function ApplyPanel({ applied, application, window: appWindow, eligibility, busy
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <h2 className="font-display font-bold text-lg text-ink">
-              {applied ? 'You have applied' : closed ? 'Applications are closed' : 'Can you apply?'}
+              {closed ? 'Applications are closed' : 'Can you apply?'}
             </h2>
             <p className="text-sm text-muted mt-1 leading-relaxed max-w-prose">
-              {applied
-                ? 'The brand reviews applications and you will be notified either way.'
-                : closed
-                  ? appWindow.closedByDeadline
-                    ? 'The application deadline for this campaign has passed.'
-                    : 'This campaign is no longer accepting applications.'
-                  : 'These are the brand’s requirements, checked against your profile. They are guidance — the brand decides who it works with.'}
+              {closed
+                ? appWindow.closedByDeadline
+                  ? 'The application deadline for this campaign has passed.'
+                  : 'This campaign is no longer accepting applications.'
+                : 'These are the brand\u2019s requirements, checked against your profile. They are guidance — the brand decides who it works with.'}
             </p>
           </div>
 
-          <div className="shrink-0">
-            {applied ? (
-              <div className="text-right">
-                <StatusPill
-                  status={application?.status === 'accepted' ? 'completed'
-                    : application?.status === 'rejected' ? 'declined' : 'pending_review'}
-                  label={application?.status === 'accepted' ? 'Accepted'
-                    : application?.status === 'rejected' ? 'Not selected' : 'Applied'}
-                />
-                {application?.status === 'accepted' && application?.deal && (
-                  <Link to={`/deals/${application.deal}`} className="btn-outline text-sm mt-2.5 block">
-                    Open negotiation
-                  </Link>
-                )}
-              </div>
-            ) : (
-              <button
-                onClick={onApply}
-                disabled={busy || closed}
-                className="btn-cta disabled:opacity-40"
-              >
-                {busy ? <Spinner className="w-4 h-4" /> : 'Apply now'}
-              </button>
-            )}
-          </div>
+          <button onClick={onApply} disabled={closed} className="btn-cta shrink-0 disabled:opacity-40">
+            Apply now
+          </button>
         </div>
 
-        {!applied && eligibility?.evaluated && eligibility.total > 0 && (
+        {!closed && eligibility?.evaluated && eligibility.total > 0 && (
           <div className="mt-5">
             <div className="flex items-baseline justify-between gap-3">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted">
-                How you match
-              </p>
-              <p className="text-xs text-muted tnum">
-                {eligibility.met} of {eligibility.total}
-              </p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted">How you match</p>
+              <p className="text-xs text-muted tnum">{eligibility.met} of {eligibility.total}</p>
             </div>
 
             <ul className="mt-3 space-y-2">
@@ -213,7 +215,7 @@ function ApplyPanel({ applied, application, window: appWindow, eligibility, busy
           </div>
         )}
 
-        {!applied && eligibility && !eligibility.evaluated && (
+        {eligibility && !eligibility.evaluated && (
           <p className="text-sm text-muted mt-4 rounded-xl2 border border-dashed border-line bg-bg/60 px-4 py-4">
             {eligibility.note}{' '}
             <Link to="/profile" className="text-brand-700 font-semibold">Open your profile →</Link>
