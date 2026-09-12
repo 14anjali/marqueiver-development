@@ -39,4 +39,14 @@ router.post('/:id/offers/:offerId/reject', validate(c.rejectOfferSchema), c.reje
 // Offers cannot be withdrawn (§4) — the endpoint was removed deliberately.
 router.post('/:id/confirm-terms', c.confirmTermsHandler);
 router.post('/:id/reject', validate(c.rejectDealSchema), c.rejectDealHandler);
+
+/* ── Change Requests — the only way locked terms may change ────────────────
+ * Reads are open to both parties; proposing and answering require compliance,
+ * like every other act that binds someone (Policy 1.3, 13.1, 1.14).
+ */
+router.get('/:id/terms-history', c.getTermsHistory);
+router.post('/:id/change-requests', requireCompliance, validate(c.changeRequestSchema), c.proposeChangeRequest);
+router.post('/:id/change-requests/:requestId/respond', requireCompliance, validate(c.respondChangeRequestSchema), c.respondChangeRequest);
+router.post('/:id/change-requests/:requestId/withdraw', c.withdrawChangeRequest);
+
 export default router;

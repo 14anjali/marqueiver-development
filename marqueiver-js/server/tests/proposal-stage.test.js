@@ -342,8 +342,23 @@ test('the UI shows versions, what changed, and the lock', () => {
     assert.ok(existsSync(composer), `missing: ${composer}`);
 
     assert.match(panel, /Version history/);
-    assert.match(panel, /Final agreed terms/);
     assert.match(panel, /changedFrom=\{/);
+
+    /**
+     * The locked document used to be rendered here too, and this asserted it.
+     * It moved to `FinalTerms`, which owns the payment schedule, the accepted
+     * amendments and the change-request route — none of which this panel knows
+     * about. While both existed the page showed the same terms twice and this
+     * copy still said "a change needs a new collaboration".
+     *
+     * So the assertion is rewritten to what is now true rather than deleted:
+     * the negotiation panel shows how the terms were reached, and exactly one
+     * component shows what they are.
+     */
+    assert.equal(/Final agreed terms/.test(panel), false);
+    const finalTerms = path.join(FRONTEND, 'components', 'deals', 'FinalTerms.jsx');
+    assert.ok(existsSync(finalTerms), `missing: ${finalTerms}`);
+    assert.match(readFileSync(finalTerms, 'utf8'), /Final terms/);
 
     // The four things a party can do with a proposal on the table.
     for (const action of ['Accept these terms', 'Counter with V', 'Decline this version', 'Confirm final terms']) {

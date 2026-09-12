@@ -252,6 +252,80 @@ const dealSchema = new Schema({
     },
 
     /**
+     * ── Accepted changes to the locked terms ───────────────────────────────
+     *
+     * `agreedTerms` above is written once and never touched again — not even by
+     * a change both parties agreed to. Every later change lands here instead,
+     * append-only, carrying the before and after of each field it moved.
+     *
+     * Two reasons it works this way rather than by editing `agreedTerms`:
+     *
+     *  1. "Neither party can silently change locked terms" is then a property
+     *     of the data, not a rule someone has to keep remembering. There is no
+     *     code path that rewrites the agreement, so there is nothing to audit.
+     *  2. A dispute asks what was agreed *and when it changed*. An `agreedTerms`
+     *     edited in place can answer the first question only, and answers it
+     *     with the latest version while presenting it as the original.
+     *
+     * `bindingTerms(deal)` in `terms.service.js` is what everything reads when
+     * it wants the terms in force now: the agreement with its amendments
+     * applied. Nothing should reconstruct that by hand.
+     *
+     * Policy 5.5 option B (paid extra revisions) writes an amendment here too —
+     * it was already changing `terms.revisionsAllowed`, `terms.deadline` and
+     * `terms.deliverables` on a locked deal without recording anything, so the
+     * frozen summary kept showing three revisions on a deal that had five.
+     */
+    /**
+     * Asks to change the locked terms, answered or awaiting an answer.
+     *
+     * Kept apart from `termsAmendments` because a request and a change are
+     * different facts: most requests are declined, and a declined one is still
+     * part of the record — "they asked for three more weeks and I said no" is
+     * exactly what a party needs to be able to show later. Only an accepted
+     * request produces an amendment.
+     */
+    changeRequests: {
+        type: [{
+            /** The fields it wants to move: `{ field: newValue }`. */
+            changes: { type: Schema.Types.Mixed, required: true },
+            reason: { type: String, default: '' },
+            status: {
+                type: String,
+                enum: ['pending', 'accepted', 'rejected', 'withdrawn'],
+                default: 'pending',
+            },
+            proposedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+            proposedByRole: { type: String, enum: ['brand', 'creator'] },
+            proposedAt: { type: Date, default: Date.now },
+            respondedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+            respondedAt: Date,
+            responseNote: { type: String, default: '' },
+        }],
+        default: [],
+    },
+
+    termsAmendments: {
+        type: [{
+            /** What moved: `{ field: { from, to } }`. */
+            changes: { type: Schema.Types.Mixed, required: true },
+            reason: { type: String, default: '' },
+            /** Which workflow produced it, so the record says how it happened. */
+            source: {
+                type: String,
+                enum: ['change_request', 'additional_terms', 'admin'],
+                required: true,
+            },
+            changeRequest: { type: Schema.Types.ObjectId },
+            proposedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+            proposedByRole: { type: String, enum: ['brand', 'creator', 'admin'] },
+            acceptedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+            acceptedAt: { type: Date, default: Date.now },
+        }],
+        default: [],
+    },
+
+    /**
      * 48-hour escrow funding window (§6, A49). Set when the brand clicks
      * "Proceed to payment" and the deal enters `escrow_pending`. Once passed,
      * A50 says funding is BLOCKED until an Admin acts — `fundingOverdue` is the
@@ -298,6 +372,58 @@ const dealSchema = new Schema({
         amount: { type: Number, default: 0 },
         fundedAt: Date,
         releasedAt: Date,
+
+        /**
+         * ── The two tranches ───────────────────────────────────────────────
+         *
+         * The confirmed requirement is a 50% advance and a 50% balance
+         * (`modules/messaging/messaging.policy.js` quotes it, and the chat gate
+         * is built on it). The money code, however, charged the whole agreed
+         * value in one order — `createPaymentSession` used `deal.terms.amount`
+         * and `computeCollaborationMoney` returned `brandPays: agreedValue`. So
+         * the policy documents and the payment path disagreed, and the payment
+         * path was what actually ran.
+         *
+         * These fields are the schedule, recorded per tranche. **Charging is
+         * deliberately not wired to them yet** — `createPaymentSession` still
+         * raises a single order, and changing that is a separate piece of work
+         * on the Cashfree path and the funding window. What is true today is
+         * that the agreed schedule is stored and shown; what is not yet true is
+         * that two orders are raised. `paymentSchedule()` in
+         * commission.service.js computes the figures, and nothing here is
+         * derived a second time.
+         *
+         * Both sides of every figure are stored, not just the brand's. The Final
+         * Terms summary shows a creator what they will receive, and a summary
+         * that recomputes that from the gross will eventually disagree with the
+         * payout that actually runs — the same class of drift the commission
+         * snapshot exists to prevent. Nothing downstream does money arithmetic
+         * on these; it reads them.
+         */
+        schedule: {
+            advancePct: { type: Number, default: 50 },
+            /** Frozen at acceptance, with the rate they were computed from. */
+            commissionPct: Number,
+            commission: Number,
+            creatorNet: Number,
+            creatorAdvance: Number,
+            creatorBalance: Number,
+            advance: {
+                /** What the brand pays on this tranche. */
+                amount: { type: Number, default: 0 },
+                funded: { type: Boolean, default: false },
+                fundedAt: Date,
+                releasedAt: Date,
+                transactionRef: { type: Schema.Types.ObjectId, ref: 'Transaction' },
+            },
+            balance: {
+                amount: { type: Number, default: 0 },
+                funded: { type: Boolean, default: false },
+                fundedAt: Date,
+                releasedAt: Date,
+                transactionRef: { type: Schema.Types.ObjectId, ref: 'Transaction' },
+            },
+        },
         transactionRef: { type: Schema.Types.ObjectId, ref: 'Transaction' },
         /** Admin's escrow decision (§8) — full refund, full payout, or split. */
         settlement: {

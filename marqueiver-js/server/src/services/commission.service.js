@@ -89,6 +89,55 @@ export function computeCollaborationMoney(agreedValue, commissionPct) {
 }
 
 /**
+ * The share of the collaboration paid up front.
+ *
+ * The confirmed requirement quoted in `modules/messaging/messaging.policy.js`
+ * — "No collaboration communication before the required 50% escrow payment is
+ * successfully verified", "Brand pays 50% advance" — is where this number comes
+ * from. It is named rather than written as `/ 2` in three places, because a
+ * split that is a literal in the code is a split nobody can change.
+ */
+export const ADVANCE_PCT = 50;
+
+/**
+ * The two tranches a collaboration is paid in.
+ *
+ * ── Split on the creator's net, not the gross ──────────────────────────────
+ *
+ * The advance is half of what the creator actually receives, after the
+ * platform commission. Splitting the gross and deducting commission at the end
+ * would put "50% advance: ₹31,000" in front of a creator whose first payment is
+ * ₹27,125 — a number that is wrong in the direction that matters, and wrong at
+ * the exact moment they are deciding whether to accept.
+ *
+ * ── The rounding closes ────────────────────────────────────────────────────
+ *
+ * `balance` is derived by subtraction rather than computed independently, so
+ * advance + balance is exactly `creatorNet` at every value. Two halves each
+ * rounded to the paisa can otherwise miss the total by a paisa, and a total
+ * that does not add up is the one thing a payment summary may never do.
+ */
+export function paymentSchedule(agreedValue, commissionPct) {
+  const money = computeCollaborationMoney(agreedValue, commissionPct);
+  const advance = round2((money.creatorNet * ADVANCE_PCT) / 100);
+
+  return {
+    ...money,
+    advancePct: ADVANCE_PCT,
+    /** What the creator receives on each tranche. */
+    creatorAdvance: advance,
+    creatorBalance: round2(money.creatorNet - advance),
+    /**
+     * What the brand pays on each tranche — the same proportion of the gross,
+     * because the commission is taken from the collaboration value rather than
+     * added to it (Policy 14.1).
+     */
+    brandAdvance: round2((money.brandPays * ADVANCE_PCT) / 100),
+    brandBalance: round2(money.brandPays - round2((money.brandPays * ADVANCE_PCT) / 100)),
+  };
+}
+
+/**
  * Split a partial release — Policy 5.5 option C (50/50), Policy 7.1 stage-based
  * cancellation, and Policy 10.4 partial determinations all release less than
  * the full amount.

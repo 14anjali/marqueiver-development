@@ -9,6 +9,12 @@ import { canRequestRevision, canCancel, REVIEW_WINDOW_DAYS, RESOLUTION_AUTO_DAYS
 import { brandCancellationOutcome, creatorCancellationOutcome } from '../../services/commission.service.js';
 import * as additionalTerms from './additionalTerms.service.js';
 import { postOffer, acceptOffer, rejectOffer, rejectDeal, confirmTerms, threadForDeal } from './negotiation.service.js';
+import {
+    proposeChange as changeRequest_propose,
+    respondToChange as changeRequest_respond,
+    withdrawChange as changeRequest_withdraw,
+    changeHistory as changeRequest_history,
+} from './changeRequest.service.js';
 import { notify, dealPayload } from '../notifications/notifications.service.js';
 import { DEAL_STATES } from '../../../../shared/types.js';
 /**
@@ -622,4 +628,101 @@ export const respondToAdditionalTerms = catchAsync(async (req, res) => {
 /** Checkout session for accepted additional terms. */
 export const startAdditionalTermsPayment = catchAsync(async (req, res) => {
     ok(res, await additionalTerms.createAdditionalTermsPaymentSession(req.params.id, req.auth.sub));
+});
+
+/* ── Change Requests (locked terms) ────────────────────────────────────────
+ *
+ * The only way agreed terms may change. One party asks, the other answers, and
+ * an accepted request appends an amendment rather than rewriting the agreement
+ * — see modules/deals/changeRequest.service.js.
+ */
+
+/**
+ * `.strict()` and a field allow-list. A change request is the one document in
+ * this system that edits something already binding, so a misspelled field must
+ * be refused loudly rather than dropped into a no-op the other party then
+ * "accepts".
+ */
+export const changeRequestSchema = z.object({
+    changes: z.object({
+        amount: z.number().min(0).optional(),
+        deliverables: z.string().max(4000).optional(),
+        contentItems: z.array(z.object({
+            contentType: z.string().min(1).max(60),
+            quantity: z.number().int().min(1).max(500).default(1),
+            platform: z.string().max(40).optional(),
+            notes: z.string().max(500).optional(),
+        })).max(20).optional(),
+        guidelines: z.object({
+            dos: z.array(z.string().max(300)).max(20).optional(),
+            donts: z.array(z.string().max(300)).max(20).optional(),
+            hashtags: z.array(z.string().max(60)).max(20).optional(),
+            mentions: z.array(z.string().max(60)).max(20).optional(),
+            notes: z.string().max(2000).optional(),
+        }).optional(),
+        startDate: z.string().optional(),
+        deadline: z.string().optional(),
+        usageRights: z.object({
+            licenceType: z.enum(['default', 'extended', 'full_assignment']).optional(),
+            durationMonths: z.number().int().min(1).max(120).optional(),
+            paidAdvertising: z.boolean().optional(),
+            whitelisting: z.boolean().optional(),
+            modificationAllowed: z.boolean().optional(),
+            notes: z.string().max(1000).optional(),
+        }).optional(),
+        exclusivity: z.string().max(500).optional(),
+        otherTerms: z.string().max(2000).optional(),
+        revisionsAllowed: z.number().int().min(0).max(20).optional(),
+    }).strict(),
+    /** Required: the other party is being asked to give something up. */
+    reason: z.string().min(10).max(1000),
+}).strict();
+
+export const proposeChangeRequest = catchAsync(async (req, res) => {
+    const { changeRequest } = await changeRequest_propose({
+        dealId: req.params.id,
+        actorId: req.auth.sub,
+        actorRole: party(req),
+        changes: req.body.changes,
+        reason: req.body.reason,
+    });
+    created(res, changeRequest);
+});
+
+export const respondChangeRequestSchema = z.object({
+    accept: z.boolean(),
+    note: z.string().max(1000).optional(),
+}).strict();
+
+export const respondChangeRequest = catchAsync(async (req, res) => {
+    const { deal, changeRequest, amendment } = await changeRequest_respond({
+        dealId: req.params.id,
+        requestId: req.params.requestId,
+        actorId: req.auth.sub,
+        actorRole: party(req),
+        accept: req.body.accept,
+        note: req.body.note,
+    });
+    ok(res, { deal, changeRequest, amendment });
+});
+
+export const withdrawChangeRequest = catchAsync(async (req, res) => {
+    const { changeRequest } = await changeRequest_withdraw({
+        dealId: req.params.id,
+        requestId: req.params.requestId,
+        actorId: req.auth.sub,
+        actorRole: party(req),
+    });
+    ok(res, changeRequest);
+});
+
+/** The agreement, what applies now, and every change asked for along the way. */
+export const getTermsHistory = catchAsync(async (req, res) => {
+    const deal = await Deal.findById(req.params.id);
+    if (!deal) throw ApiError.notFound('Collaboration not found');
+
+    const isParty = [deal.brand.toString(), deal.creator.toString()].includes(req.auth.sub);
+    if (!isParty && req.auth.role !== 'admin') throw ApiError.forbidden();
+
+    ok(res, changeRequest_history(deal));
 });

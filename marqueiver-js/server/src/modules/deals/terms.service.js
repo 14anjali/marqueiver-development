@@ -4,7 +4,7 @@ import { ApiError } from '../../utils/apiError.js';
 import { transitionDeal } from './deals.service.js';
 import { notify, dealPayload } from '../notifications/notifications.service.js';
 import { TERMS_LOCKED_STATES } from './dealStateMachine.js';
-import { currentCommissionPct } from '../../services/commission.service.js';
+import { currentCommissionPct, paymentSchedule } from '../../services/commission.service.js';
 import { currentPolicyVersionMap } from '../policies/policies.controller.js';
 
 /**
@@ -111,10 +111,44 @@ export async function confirmTerms({ dealId, actorId, actorRole }) {
      * rate at release would silently re-price a deal accepted under a
      * promotional rate. `settleRelease` reads this snapshot.
      */
+    const ratePct = currentCommissionPct();
     deal.commission = {
         ...(deal.commission ?? {}),
-        ratePct: currentCommissionPct(),
+        ratePct,
         snapshotAt: new Date(),
+    };
+
+    /**
+     * The payment schedule, frozen with the rate it was computed from.
+     *
+     * Stored rather than derived at read time for the same reason the
+     * commission rate is snapshotted (Policy 14.7/14.8): the figures both
+     * parties saw when they agreed are the figures that apply, and a rate
+     * change tomorrow must not silently restate what the creator was told they
+     * would be paid.
+     */
+    const schedule = paymentSchedule(t.amount ?? 0, ratePct);
+    deal.escrow = {
+        ...(deal.escrow?.toObject?.() ?? deal.escrow ?? {}),
+        amount: schedule.brandPays,
+        schedule: {
+            advancePct: schedule.advancePct,
+            // Both sides frozen here, so no surface recomputes what a creator
+            // is told they will be paid.
+            commissionPct: schedule.commissionPct,
+            commission: schedule.commission,
+            creatorNet: schedule.creatorNet,
+            creatorAdvance: schedule.creatorAdvance,
+            creatorBalance: schedule.creatorBalance,
+            advance: {
+                ...(deal.escrow?.schedule?.advance ?? {}),
+                amount: schedule.brandAdvance,
+            },
+            balance: {
+                ...(deal.escrow?.schedule?.balance ?? {}),
+                amount: schedule.brandBalance,
+            },
+        },
     };
 
     /**
@@ -170,6 +204,65 @@ export async function unconfirmTerms({ dealId, actorId, actorRole }) {
     deal.termsConfirmation[actorRole] = { at: null, by: null };
     await deal.save();
     return deal;
+}
+
+/**
+ * The terms in force right now: the agreement, with its accepted amendments
+ * applied in order.
+ *
+ * `agreedTerms` is never rewritten — not even by a change both parties agreed
+ * to — so it alone answers "what was originally agreed" and cannot answer
+ * "what applies today". This answers the second question, and it is the only
+ * thing that should: a caller reconstructing it by hand will sooner or later
+ * forget the amendments and quote stale terms as binding.
+ */
+export function bindingTerms(deal) {
+    const base = deal?.agreedTerms?.toObject?.() ?? deal?.agreedTerms;
+    if (!base) return null;
+
+    const out = { ...base };
+    for (const a of deal.termsAmendments ?? []) {
+        for (const [field, change] of Object.entries(a.changes ?? {})) {
+            out[field] = change?.to;
+        }
+    }
+    return out;
+}
+
+/**
+ * Record an accepted change to locked terms.
+ *
+ * The single writer for `termsAmendments`, and the reason `agreedTerms` has no
+ * writer at all after the lock. Callers pass what moved; this stores the before
+ * and after, so the record is a diff rather than a restatement.
+ *
+ * Returns the amendment, or null when nothing actually changed — an amendment
+ * that records no change is noise in a document people read to find out what
+ * changed.
+ */
+export function recordAmendment(deal, { changes, reason, source, proposedBy, proposedByRole, acceptedBy, changeRequest }) {
+    const current = bindingTerms(deal) ?? {};
+    const diff = {};
+
+    for (const [field, to] of Object.entries(changes ?? {})) {
+        const from = current[field];
+        if (JSON.stringify(from ?? null) === JSON.stringify(to ?? null)) continue;
+        diff[field] = { from: from ?? null, to: to ?? null };
+    }
+    if (!Object.keys(diff).length) return null;
+
+    const amendment = {
+        changes: diff,
+        reason: reason ?? '',
+        source,
+        changeRequest,
+        proposedBy,
+        proposedByRole,
+        acceptedBy,
+        acceptedAt: new Date(),
+    };
+    deal.termsAmendments = [...(deal.termsAmendments ?? []), amendment];
+    return amendment;
 }
 
 /**

@@ -6,6 +6,8 @@ import NegotiationPanel from '../components/deals/NegotiationPanel';
 import CancellationDialog from '../components/deals/CancellationDialog';
 import SubmitWorkDialog from '../components/deals/SubmitWorkDialog';
 import AdditionalTermsPanel from '../components/deals/AdditionalTermsPanel';
+import FinalTerms from '../components/deals/FinalTerms';
+import ChangeRequestPanel from '../components/deals/ChangeRequestPanel';
 import { Modal } from '../components/overlay';
 import { StatusPill, Money, Steps, Progress, SkeletonCard, SuccessMark } from '../components/feedback';
 import { ChevLeft, Clock, Send, Star, Check } from '../components/icons';
@@ -113,11 +115,33 @@ export default function DealDetailPage() {
 
   const role = user?.role === 'creator' ? 'creator' : 'brand';
 
+  /**
+   * The agreement, the terms in force now, and every change asked for.
+   *
+   * Loaded next to the deal rather than derived from it: `agreedTerms` alone
+   * cannot say what applies today once an amendment exists, and a page that
+   * reconstructs that itself will sooner or later quote stale terms as binding.
+   * A collaboration with no locked terms simply answers "not locked".
+   */
+  const [terms, setTerms] = useState(null);
+  const [requestingChange, setRequestingChange] = useState(false);
+
+  /** At most one request is ever open — the server refuses a second. */
+  const pendingChange = (terms?.changeRequests ?? []).find((c) => c.status === 'pending') ?? null;
+
+  const loadTerms = async () => {
+    try {
+      const { data } = await api.termsHistory(id);
+      setTerms(data);
+    } catch { setTerms(null); }
+  };
+
   const load = async () => {
     setLoading(true); setError(null);
     try {
       const { data } = await api.getDeal(id);
       setDeal(data);
+      loadTerms();
       try { const m = await api.listMessages(id); setMessages(m.data || []); } catch { /* chat may be locked */ }
     } catch (e) { setError(e); } finally { setLoading(false); }
   };
@@ -292,6 +316,35 @@ export default function DealDetailPage() {
                   </p>
                 )}
               </motion.section>
+            )}
+
+            {/* Once terms are locked, this is the document both parties are
+                bound to — shown above the negotiation that produced it. */}
+            {terms?.locked && (
+              <motion.div variants={withReducedMotion(rise, reduced)}>
+                <FinalTerms
+                  deal={deal}
+                  role={role}
+                  amendments={terms.amendments}
+                  binding={terms.bindingTerms}
+                  canRequestChange={terms.canRequest && !pendingChange}
+                  onRequestChange={() => setRequestingChange(true)}
+                />
+              </motion.div>
+            )}
+
+            {/* A live request sits between the terms and the history — it is the
+                one thing on this page waiting on somebody. */}
+            {pendingChange && (
+              <motion.div variants={withReducedMotion(rise, reduced)}>
+                <ChangeRequestPanel
+                  deal={deal}
+                  role={role}
+                  binding={terms?.bindingTerms}
+                  pending={pendingChange}
+                  onChanged={load}
+                />
+              </motion.div>
             )}
 
             <motion.div variants={withReducedMotion(rise, reduced)}>
@@ -511,6 +564,20 @@ export default function DealDetailPage() {
           </div>
         </motion.div>
       </motion.div>
+
+      {/* The change-request composer. Mounted once, alongside the other
+          dialogs, and only when there are locked terms to change. */}
+      {terms?.locked && (
+        <ChangeRequestPanel
+          open={requestingChange}
+          onClose={() => setRequestingChange(false)}
+          deal={deal}
+          role={role}
+          binding={terms.bindingTerms}
+          pending={null}
+          onChanged={load}
+        />
+      )}
 
       {showCancel && (
         <CancellationDialog

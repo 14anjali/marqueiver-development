@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Handshake, Check, Clock, Lock } from '../icons';
+import { Handshake, Check, Clock } from '../icons';
 import ProposalTerms from './ProposalTerms';
 import ProposalComposer from './ProposalComposer';
 import { api } from '../../lib/api';
@@ -136,23 +136,20 @@ export default function NegotiationPanel({ deal, role, onUpdated }) {
         </div>
       ) : (
         <>
-          {/* ── the locked final terms ─────────────────────────────────── */}
+          {/*
+            The locked terms are NOT repeated here.
+            `FinalTerms` above owns that document now — it carries the payment
+            schedule, the accepted amendments and the route to a change request,
+            none of which this panel knows about. While both rendered, the page
+            showed the same terms twice and this copy still said "a change needs
+            a new collaboration", which stopped being true the moment change
+            requests existed. What belongs here is how those terms were reached.
+          */}
           {locked && (
-            <div className="rounded-xl2 border border-jade-200 bg-jade-50/50 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-                <p className="text-sm font-semibold text-ink inline-flex items-center gap-1.5">
-                  <Lock className="w-4 h-4 text-jade-700" /> Final agreed terms
-                </p>
-                <span className="pill-done">
-                  {deal.agreedTerms.fromOfferSeq ? `from V${deal.agreedTerms.fromOfferSeq}` : 'agreed'}
-                </span>
-              </div>
-              <p className="text-xs text-muted mb-3.5">
-                Locked {when(deal.agreedTerms.lockedAt)}. These cannot be changed —
-                a change needs a new collaboration.
-              </p>
-              <ProposalTerms terms={deal.agreedTerms} />
-            </div>
+            <p className="text-sm text-muted leading-relaxed">
+              These terms are agreed and locked — the summary above is the document
+              both of you are bound to. Below is how you got there.
+            </p>
           )}
 
           {/* ── accepted, awaiting confirmation ───────────────────────── */}

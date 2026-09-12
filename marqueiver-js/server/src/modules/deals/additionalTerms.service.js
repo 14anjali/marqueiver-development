@@ -4,6 +4,7 @@ import { notify, dealPayload } from '../notifications/notifications.service.js';
 import { currentCommissionPct, computeCollaborationMoney } from '../../services/commission.service.js';
 import * as cashfree from '../../services/cashfree.service.js';
 import { transitionDeal } from './deals.service.js';
+import { recordAmendment } from './terms.service.js';
 
 /**
  * Policy 5.5 option B — a further revision, paid for.
@@ -218,6 +219,35 @@ export async function fundAdditionalTerms({ dealId, actorId }) {
   if (deal.additionalTerms.scopeNote) {
     deal.terms.deliverables = `${deal.terms.deliverables}\n\nAdditional (paid): ${deal.additionalTerms.scopeNote}`.trim();
   }
+
+  /**
+   * ── And the locked record is amended to match ────────────────────────────
+   *
+   * These three lines above change the terms of a collaboration that is past
+   * `accepted` — a locked state. That is legitimate: this is Policy 5.5 option
+   * B, the brand proposed, the creator accepted and the money is in escrow, so
+   * it is a change request that completed. What was missing is the record of
+   * it: `agreedTerms` still said three revisions on a deal that now had five,
+   * and the Final Terms summary both parties read is generated from
+   * `agreedTerms`. The scope grew and the document describing the scope did
+   * not, which is precisely the silent change the lock exists to prevent.
+   *
+   * `recordAmendment` diffs against the terms currently in force, so the entry
+   * says what moved rather than restating everything.
+   */
+  recordAmendment(deal, {
+    changes: {
+      revisionsAllowed: deal.terms.revisionsAllowed,
+      ...(deal.additionalTerms.deadline ? { deadline: deal.terms.deadline } : {}),
+      ...(deal.additionalTerms.scopeNote ? { deliverables: deal.terms.deliverables } : {}),
+    },
+    reason: `Policy 5.5 option B — ${revisionsAdded} further revision`
+      + `${revisionsAdded === 1 ? '' : 's'}, paid for`,
+    source: 'additional_terms',
+    proposedBy: deal.brand,
+    proposedByRole: 'brand',
+    acceptedBy: deal.creator,
+  });
 
   // Escrow now holds the original plus this addition.
   deal.escrow.amount = (deal.escrow.amount ?? 0) + amount;
