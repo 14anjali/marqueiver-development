@@ -45,6 +45,16 @@ const FIELDS = [
   { key: 'otherTerms', label: 'Other terms', kind: 'text' },
 ];
 
+/**
+ * The same names, for anything that reports a change rather than composing one.
+ *
+ * Exported from here because this is where the list of changeable fields is
+ * already written down. The activity history names the fields that moved, and a
+ * second private map would be one "usageRights" away from the composer calling
+ * it "Usage rights" while the history calls it "usageRights".
+ */
+export const FIELD_LABEL = Object.fromEntries(FIELDS.map((f) => [f.key, f.label]));
+
 export default function ChangeRequestPanel({
   open, onClose, deal, role, binding, pending, onChanged,
 }) {

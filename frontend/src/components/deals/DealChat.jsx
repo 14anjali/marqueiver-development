@@ -87,9 +87,18 @@ function availableReferences({ offers = [], terms }) {
   return out;
 }
 
-export default function DealChat({ deal, role, locked, lockReason, offers, terms }) {
+/**
+ * The thread is loaded by the page, not by this component.
+ *
+ * The workspace's Files panel lists every attachment ever sent, which means the
+ * same messages. Fetching them twice would be two requests for one list and two
+ * versions of it on screen at once, so the page owns the fetch and this reports
+ * what it sent back through `onSent`.
+ */
+export default function DealChat({
+  deal, role, locked, lockReason, offers, terms, messages, onSent,
+}) {
   const toast = useToast();
-  const [messages, setMessages] = useState(null);
   const [body, setBody] = useState('');
   const [attachments, setAttachments] = useState([]);
   const [references, setReferences] = useState([]);
@@ -97,15 +106,6 @@ export default function DealChat({ deal, role, locked, lockReason, offers, terms
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
   const endRef = useRef(null);
-
-  useEffect(() => {
-    if (locked) { setMessages([]); return; }
-    let alive = true;
-    api.listMessages(deal._id)
-      .then(({ data }) => { if (alive) setMessages(data ?? []); })
-      .catch(() => { if (alive) setMessages([]); });
-    return () => { alive = false; };
-  }, [deal._id, locked]);
 
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [messages?.length]);
 
@@ -139,7 +139,7 @@ export default function DealChat({ deal, role, locked, lockReason, offers, terms
     };
     try {
       const { data } = await api.sendMessage(deal._id, payload);
-      setMessages((m) => [...(m ?? []), data]);
+      onSent?.(data);
       setBody(''); setAttachments([]); setReferences([]);
     } catch (e) {
       toast.push(e.message, 'error');

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { Types } from 'mongoose';
 import { catchAsync, ApiError } from '../../utils/apiError.js';
 import { ok, created } from '../../utils/respond.js';
-import { Deal, User, CreatorProfile, Offer } from '../../models/index.js';
+import { Deal, User, CreatorProfile, BrandProfile, Campaign, Offer } from '../../models/index.js';
 import { INCLUDED_REVISIONS } from '../../models/Deal.js';
 import {
     transitionDeal, listDealsForUser, createPaymentSession,
@@ -170,6 +170,21 @@ export const listMyDeals = catchAsync(async (req, res) => {
     const deals = await listDealsForUser(req.auth.sub, role, state);
     ok(res, deals);
 });
+/**
+ * Who the parties are, as the other side may see them.
+ *
+ * Allow-lists, not subtractions — the same discipline as the applicant review
+ * queue. A field added to either profile tomorrow does not reach the counterpart
+ * by default, which is the whole reason these are named lists.
+ *
+ * Deliberately absent from both: contact details (Policy 4.2 keeps the work on
+ * the platform), and on the creator side `payoutMethod`, `pan` and `kyc`
+ * (Policy 2.4). The parties are already in a collaboration together — that
+ * entitles each to know who the other is, not to their bank details.
+ */
+const BRAND_PARTY_FIELDS = 'user companyName logo tagline industry location website verifications';
+const CREATOR_PARTY_FIELDS = 'user displayName avatarUrl headline location categories languages';
+
 export const getDeal = catchAsync(async (req, res) => {
     // Not lean: deals predating offers[] get their opening offer written on
     // first read, so it has a real _id the accept/reject endpoints can address.
@@ -179,7 +194,35 @@ export const getDeal = catchAsync(async (req, res) => {
     const isParty = [deal.brand.toString(), deal.creator.toString()].includes(req.auth.sub);
     if (!isParty && req.auth.role !== 'admin')
         throw ApiError.forbidden();
-    ok(res, deal);
+
+    /**
+     * The workspace has to name the brand and the creator, and this returned
+     * neither — `brand` and `creator` were raw ObjectIds, so the collaboration
+     * screen could show a title and two ids. Batched, not fetched per field:
+     * three queries regardless of how the page is rendered.
+     */
+    const [brand, creator, campaign] = await Promise.all([
+        BrandProfile.findOne({ user: deal.brand }).select(BRAND_PARTY_FIELDS).lean(),
+        CreatorProfile.findOne({ user: deal.creator }).select(CREATOR_PARTY_FIELDS).lean(),
+        deal.campaign
+            ? Campaign.findById(deal.campaign).select('title status category images').lean()
+            : null,
+    ]);
+
+    ok(res, {
+        ...deal.toObject(),
+        parties: {
+            /*
+              `null` rather than an invented placeholder when a profile is
+              missing. A deleted account is a real state, and "Unknown creator"
+              is information the UI should decide how to show, not something
+              this endpoint should make up.
+            */
+            brand: brand ?? null,
+            creator: creator ?? null,
+        },
+        campaignSummary: campaign ?? null,
+    });
 });
 /**
  * Real Cashfree Checkout session (feature: Frontend Cashfree Checkout).

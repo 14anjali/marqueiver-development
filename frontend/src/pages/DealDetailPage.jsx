@@ -10,10 +10,13 @@ import FinalTerms from '../components/deals/FinalTerms';
 import ChangeRequestPanel from '../components/deals/ChangeRequestPanel';
 import AdvancePayment from '../components/deals/AdvancePayment';
 import DealChat from '../components/deals/DealChat';
+import WorkspaceHeader from '../components/deals/WorkspaceHeader';
+import CollaborationFiles from '../components/deals/CollaborationFiles';
+import ActivityHistory from '../components/deals/ActivityHistory';
 import { MESSAGING_ALLOWED_STATES, MESSAGING_LOCK_REASON } from '../components/deals/messagingLock';
 import { Modal } from '../components/overlay';
-import { StatusPill, Money, Steps, Progress, SkeletonCard, SuccessMark } from '../components/feedback';
-import { ChevLeft, Clock, Send, Star, Check } from '../components/icons';
+import { StatusPill, Money, Progress, SkeletonCard, SuccessMark } from '../components/feedback';
+import { ChevLeft, Star, Check } from '../components/icons';
 import { api } from '../lib/api';
 import { openCashfreeCheckout } from '../lib/cashfree';
 import { useAuth } from '../lib/auth';
@@ -41,6 +44,22 @@ import { rise, stagger, page, withReducedMotion, usePrefersReducedMotion } from 
  *     only, so `indexOf` returned -1 for `revision`, `resolution`, `disputed`
  *     and `cancelled` and the whole progress indicator disappeared at exactly
  *     the moments a party most wants to know where they are.
+ *
+ * ── The workspace ──────────────────────────────────────────────────────────
+ *
+ * This page is now the collaboration workspace both parties work in, which
+ * means it has to answer four questions without being read end to end: what is
+ * done, what is pending, what *I* must do next, and what is locked. Those are
+ * answered at the top — `WorkspaceHeader` names the campaign and both parties,
+ * and the stepper inside it carries the stage states and the one line saying
+ * whose move it is.
+ *
+ * Everything below is the detail, in the order somebody actually needs it: the
+ * actions available, the terms in force, the negotiation that produced them,
+ * the deliverables, then the history. Requirements are not given a section of
+ * their own — they are the terms, and `FinalTerms`/`NegotiationPanel` already
+ * render them. A second readout of the same brief is a second thing to keep in
+ * agreement with the agreement.
  */
 
 /**
@@ -66,25 +85,16 @@ const ACTIONS = {
   },
 };
 
-/** The happy path, for the progress indicator. */
-const STEPS = ['invitation', 'negotiation', 'accepted', 'escrow_pending', 'in_progress', 'submitted', 'completed'];
-const STEP_LABEL = ['Invited', 'Negotiating', 'Terms agreed', 'Awaiting payment', 'In progress', 'In review', 'Complete'];
+/*
+  The progress indicator lives in `components/deals/CollaborationStepper.jsx`.
 
-/**
- * Where a state sits on the happy path.
- *
- * States off the path map to the step they are effectively at, so the indicator
- * keeps working instead of disappearing. `revision` is back at "in progress"
- * because that is what is happening; `resolution` and `disputed` sit at review,
- * which is where they branched from.
- */
-const STEP_FOR = {
-  revision: 4, resolution: 5, disputed: 5, declined: 0, cancelled: 0,
-};
-const stepIndex = (state) => {
-  const direct = STEPS.indexOf(state);
-  return direct >= 0 ? direct : (STEP_FOR[state] ?? 0);
-};
+  This page had its own: a seven-segment bar plus a `STEP_FOR` table mapping the
+  off-path states onto whichever segment they branched from. That answered "how
+  far along is this" and could not answer the three questions that matter more —
+  whose move it is, what is locked, and why. The stepper answers all four, from
+  the same deal state plus the payment record, and the off-path states are drawn
+  as what they are rather than pushed onto a line they left.
+*/
 
 /**
  * Date + time, with the month spelled. The numeric `en-IN` default rendered
@@ -130,6 +140,25 @@ export default function DealDetailPage() {
   /** Proposal versions, so a message can point at one. */
   const [negotiationOffers, setNegotiationOffers] = useState([]);
 
+  /**
+   * The payment record and the thread, fetched once for the whole workspace.
+   *
+   * Three things read the payments — the stepper (the one status the deal alone
+   * cannot express is "verified, but not started"), the advance panel and the
+   * activity history — and two read the messages: the chat and the files list.
+   * Each component fetching for itself means the same request two or three times
+   * and, worse, two lists on screen that can disagree after a send.
+   */
+  const [payments, setPayments] = useState([]);
+  const [messages, setMessages] = useState(null);
+
+  const loadPayments = async () => {
+    try {
+      const { data } = await api.paymentRecords(id);
+      setPayments(data ?? []);
+    } catch { setPayments([]); }
+  };
+
   /** At most one request is ever open — the server refuses a second. */
   const pendingChange = (terms?.changeRequests ?? []).find((c) => c.status === 'pending') ?? null;
 
@@ -146,9 +175,22 @@ export default function DealDetailPage() {
       const { data } = await api.getDeal(id);
       setDeal(data);
       loadTerms();
+      loadPayments();
       api.getNegotiation(id)
         .then((n) => setNegotiationOffers(n.data?.offers ?? []))
         .catch(() => setNegotiationOffers([]));
+
+      /*
+        Messaging is gated on the server, so this is not the lock — a locked
+        collaboration simply has nothing to list, and asking would be refused.
+      */
+      if (MESSAGING_ALLOWED_STATES.includes(data.state)) {
+        api.listMessages(id)
+          .then((m) => setMessages(m.data ?? []))
+          .catch(() => setMessages([]));
+      } else {
+        setMessages([]);
+      }
     } catch (e) { setError(e); } finally { setLoading(false); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
@@ -218,6 +260,25 @@ export default function DealDetailPage() {
   const actions = ACTIONS[role]?.[deal.state] || [];
   const escrowFunded = Boolean(deal.escrow?.funded);
   const released = Boolean(deal.escrow?.releasedAt);
+
+  /**
+   * What is actually held, which is not the agreed total.
+   *
+   * The escrow card read `deal.escrow.amount` — the whole collaboration value —
+   * and said "Funded: yes". Under the 50/50 schedule only the advance has been
+   * collected, so a brand in `submitted` was being told ₹62,000 was held when
+   * ₹31,000 was, and a creator was being told the same. The schedule is the
+   * record of what was charged; this reads it, and says plainly that the balance
+   * is not collected yet.
+   */
+  const sched = deal.escrow?.schedule;
+  // Once the escrow is released the question is no longer what is held, so the
+  // tranche wording stops: "Held in escrow" next to "Released: yes" is two
+  // answers to the same question.
+  const balanceOwed = (sched?.balance?.amount ?? 0) > 0 && !sched?.balance?.funded && !released;
+  const heldAmount = balanceOwed && sched?.advance?.funded
+    ? sched.advance.amount
+    : (deal.escrow?.amount ?? deal.terms?.amount);
   const revisionsUsed = deal.revisionCount ?? 0;
   const revisionsAllowed = deal.terms?.revisionsAllowed ?? 3;
   /**
@@ -265,40 +326,28 @@ export default function DealDetailPage() {
           className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-5"
         >
           <div className="space-y-4 min-w-0">
-            {/* ── header ─────────────────────────────────────────────── */}
-            <motion.section variants={withReducedMotion(rise, reduced)} className="card-edge p-5">
-              <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div className="min-w-0">
-                  <h1 className="font-display font-extrabold text-xl text-ink">{deal.title}</h1>
-                  <p className="text-muted text-sm mt-1 flex items-center gap-1.5 flex-wrap">
-                    {deal.contentTypes?.join(', ') || 'Campaign'}
-                    <span className="text-line">·</span>
-                    <Money amount={deal.terms?.amount} className="text-sm" />
-                  </p>
-                </div>
-                <StatusPill status={deal.state} />
-              </div>
-
-              <Steps steps={STEP_LABEL} current={stepIndex(deal.state)} className="mt-5" />
-
-              {/* Revisions, where the parties can see them rather than
-                  discovering the cap when they hit it. */}
-              {revisionsUsed > 0 && (
-                <div className="mt-4 pt-4 border-t border-line">
-                  <Progress
-                    value={revisionsUsed}
-                    max={revisionsAllowed}
-                    tone={revisionsUsed >= revisionsAllowed ? 'money' : 'brand'}
-                    label={`${revisionsUsed} of ${revisionsAllowed} revisions used`}
-                  />
-                  {revisionsUsed >= revisionsAllowed && (
-                    <p className="text-xs text-money-700 mt-2">
-                      Included revisions are used up. Further work needs agreed additional terms.
-                    </p>
-                  )}
-                </div>
-              )}
+            {/* ── who, what, where it is, whose move ─────────────────── */}
+            <motion.section variants={withReducedMotion(rise, reduced)}>
+              <WorkspaceHeader deal={deal} role={role} payments={payments} binding={terms?.bindingTerms} />
             </motion.section>
+
+            {/* Revisions, where the parties can see them rather than
+                discovering the cap when they hit it. */}
+            {revisionsUsed > 0 && (
+              <motion.section variants={withReducedMotion(rise, reduced)} className="card p-5">
+                <Progress
+                  value={revisionsUsed}
+                  max={revisionsAllowed}
+                  tone={revisionsUsed >= revisionsAllowed ? 'money' : 'brand'}
+                  label={`${revisionsUsed} of ${revisionsAllowed} revisions used`}
+                />
+                {revisionsUsed >= revisionsAllowed && (
+                  <p className="text-xs text-money-700 mt-2">
+                    Included revisions are used up. Further work needs agreed additional terms.
+                  </p>
+                )}
+              </motion.section>
+            )}
 
             {/* ── actions ────────────────────────────────────────────── */}
             {actions.length > 0 && (
@@ -416,32 +465,15 @@ export default function DealDetailPage() {
               </motion.section>
             )}
 
-            {/* ── timeline ───────────────────────────────────────────── */}
-            <motion.section variants={withReducedMotion(rise, reduced)} className="card p-5">
-              <h2 className="font-display font-bold text-ink text-sm mb-3">Timeline</h2>
-              {!deal.timeline?.length ? (
-                <p className="text-sm text-muted">Nothing has happened yet.</p>
-              ) : (
-                <ol className="space-y-3">
-                  {deal.timeline.map((t, i) => (
-                    <li key={i} className="flex items-start gap-3">
-                      <span className="w-7 h-7 rounded-full wash text-brand-600 grid place-items-center shrink-0" aria-hidden="true">
-                        <Clock className="w-3.5 h-3.5" />
-                      </span>
-                      <div className="min-w-0">
-                        <div className="text-sm text-ink">
-                          <span className="font-medium">{(t.to ?? '').replace(/_/g, ' ')}</span>
-                          {t.byRole && <span className="text-muted"> · by {t.byRole}</span>}
-                        </div>
-                        {t.note && <div className="text-xs text-muted mt-0.5 leading-relaxed">{t.note}</div>}
-                        <div className="text-xs text-muted tnum mt-0.5">
-                          {t.at ? new Date(t.at).toLocaleString('en-IN', STAMP) : ''}
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              )}
+            {/*
+              State transitions, payments, amendments, change requests and
+              submissions, in one order. This was `deal.timeline` alone, which
+              records transitions and nothing else — so a failed payment, a
+              retry and an accepted amendment left no trace on the page that is
+              supposed to be the record of the collaboration.
+            */}
+            <motion.section variants={withReducedMotion(rise, reduced)}>
+              <ActivityHistory deal={deal} payments={payments} />
             </motion.section>
 
             {/* ── review ─────────────────────────────────────────────── */}
@@ -521,9 +553,15 @@ export default function DealDetailPage() {
             <motion.section variants={withReducedMotion(rise, reduced)} className="panel-money">
               <h2 className="font-display font-bold text-money-700 text-sm mb-3">Escrow</h2>
               <div className="flex justify-between items-baseline py-1.5">
-                <span className="text-sm text-muted">Amount</span>
-                <Money amount={deal.escrow?.amount ?? deal.terms?.amount} />
+                <span className="text-sm text-muted">{balanceOwed ? 'Held in escrow' : 'Amount'}</span>
+                <Money amount={heldAmount} />
               </div>
+              {balanceOwed && (
+                <div className="flex justify-between items-baseline py-1.5 text-sm">
+                  <span className="text-muted">Remaining 50%</span>
+                  <span className="text-muted">Not collected yet</span>
+                </div>
+              )}
               <div className="flex justify-between items-center py-1.5 text-sm">
                 <span className="text-muted">Funded</span>
                 <span className={escrowFunded ? 'text-jade-700 font-medium inline-flex items-center gap-1' : 'text-muted'}>
@@ -549,7 +587,13 @@ export default function DealDetailPage() {
             {/* The one step between agreed terms and work starting. */}
             {showAdvancePanel && (
               <motion.div variants={withReducedMotion(rise, reduced)}>
-                <AdvancePayment deal={deal} role={role} onUpdated={(d) => (d ? setDeal(d) : load())} />
+                <AdvancePayment
+                  deal={deal}
+                  role={role}
+                  records={payments}
+                  onReload={loadPayments}
+                  onUpdated={(d) => (d ? setDeal(d) : load())}
+                />
               </motion.div>
             )}
 
@@ -561,7 +605,15 @@ export default function DealDetailPage() {
                 lockReason={chatLockReason}
                 offers={negotiationOffers}
                 terms={terms}
+                messages={chatLocked ? [] : messages}
+                onSent={(m) => setMessages((list) => [...(list ?? []), m])}
               />
+            </motion.div>
+
+            {/* Every attachment and deliverable link, so nobody has to scroll a
+                month of messages to find a reference image. */}
+            <motion.div variants={withReducedMotion(rise, reduced)}>
+              <CollaborationFiles deal={deal} messages={messages ?? []} locked={chatLocked} />
             </motion.div>
           </div>
         </motion.div>

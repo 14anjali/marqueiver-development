@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Money } from '../feedback';
 import { Lock, Check, Clock } from '../icons';
 import { api } from '../../lib/api';
@@ -57,19 +57,19 @@ const latestAdvance = (records = []) => [...records]
   .filter((t) => t.type === 'escrow_fund' && t.tranche !== 'balance')
   .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0] ?? null;
 
-export default function AdvancePayment({ deal, role, onUpdated }) {
+/**
+ * `records` comes from the page.
+ *
+ * The stepper and the activity history both read the payment record too — the
+ * status "payment verified, collaboration not started" cannot be told from the
+ * deal alone — so the page fetches it once and hands it down. This component
+ * used to fetch it itself, which was fine while it was the only reader.
+ */
+export default function AdvancePayment({ deal, role, records, onReload, onUpdated }) {
   const toast = useToast();
-  const [records, setRecords] = useState(null);
   const [busy, setBusy] = useState('');
 
-  const load = useCallback(async () => {
-    try {
-      const { data } = await api.paymentRecords(deal._id);
-      setRecords(data ?? []);
-    } catch { setRecords([]); }
-  }, [deal._id]);
-
-  useEffect(() => { load(); }, [load]);
+  const load = useCallback(async () => { await onReload?.(); }, [onReload]);
 
   const sched = deal.escrow?.schedule ?? {};
   const pct = sched.advancePct ?? 50;
@@ -79,6 +79,18 @@ export default function AdvancePayment({ deal, role, onUpdated }) {
   const current = latestAdvance(records ?? []);
   const state = current?.status ?? 'pending';
   const failed = state === 'failed';
+
+  /**
+   * Verified money, unstarted collaboration.
+   *
+   * Rare — the webhook confirms and the transition fails — but the panel offered
+   * a "Pay the advance" button underneath a "Verified" pill, which is an
+   * invitation to pay twice for the same tranche. The screenshot of this state
+   * is what showed it. Nothing here can fix the transition, so the panel stops
+   * asking for money and says where the money is.
+   */
+  const paidButNotStarted = !advanceFunded
+    && ['verified', 'success'].includes(state);
   const attempts = (records ?? []).filter((t) => t.type === 'escrow_fund' && t.tranche !== 'balance').length;
 
   /**
@@ -145,8 +157,20 @@ export default function AdvancePayment({ deal, role, onUpdated }) {
       </header>
 
       <div className="p-5 space-y-4">
+        {paidButNotStarted && (
+          <div className="rounded-xl2 border border-money-100 bg-money-50 p-3.5">
+            <p className="text-sm font-semibold text-money-700">The advance has been paid</p>
+            <p className="text-xs text-ink/80 mt-1 leading-relaxed">
+              The payment partner confirmed it, but the collaboration has not started yet.
+              Nothing further will be charged. Contact support if it does not start shortly.
+            </p>
+          </div>
+        )}
+
         <p className="text-sm text-muted leading-relaxed">
-          {isBrand
+          {paidButNotStarted
+            ? 'The money is held in escrow against this collaboration.'
+            : isBrand
             ? `The collaboration starts once the ${pct}% advance is in escrow and the payment partner confirms it. Until then messaging stays locked.`
             : `The brand pays a ${pct}% advance into escrow before work starts. Messaging opens when the payment partner confirms it — nothing is needed from you.`}
         </p>
@@ -187,7 +211,7 @@ export default function AdvancePayment({ deal, role, onUpdated }) {
           </div>
         )}
 
-        {isBrand ? (
+        {isBrand && !paidButNotStarted ? (
           <button onClick={pay} disabled={!!busy} className="btn-money w-full py-3">
             {busy === 'pay'
               ? <><Spinner className="w-4 h-4" /> Opening checkout…</>
@@ -195,7 +219,7 @@ export default function AdvancePayment({ deal, role, onUpdated }) {
               : state === 'initiated' ? 'Continue the payment'
               : <>Pay the advance{sched.advance?.amount > 0 && <> · <Money amount={sched.advance.amount} className="text-sm" /></>}</>}
           </button>
-        ) : (
+        ) : paidButNotStarted ? null : (
           <p className="text-xs text-muted leading-relaxed">
             {failed
               ? 'The brand has been told the payment failed and can try again.'
