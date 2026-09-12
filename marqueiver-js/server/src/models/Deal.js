@@ -35,6 +35,32 @@ const dealSchema = new Schema({
         amount: { type: Number, required: true, min: 0 },
         deliverables: { type: String, default: '' },
         deadline: Date,
+        /**
+         * The structured half of the brief, carried over from whichever proposal
+         * version was accepted. Added alongside `deliverables` rather than
+         * replacing it: the free-text line is what a summary renders, and the
+         * rows are what a deliverable count can be checked against.
+         *
+         * Usage rights and exclusivity are NOT here — they live at the top level
+         * of this schema, which Policy 5.2 already designates as the agreed
+         * scope. One home each, so nothing has to decide which copy is true.
+         */
+        contentItems: {
+            type: [{
+                contentType: String, quantity: Number, platform: String, notes: String, _id: false,
+            }],
+            default: [],
+        },
+        guidelines: {
+            dos: { type: [String], default: [] },
+            donts: { type: [String], default: [] },
+            hashtags: { type: [String], default: [] },
+            mentions: { type: [String], default: [] },
+            notes: { type: String, default: '' },
+        },
+        /** When work begins. `deadline` is when it is due. */
+        startDate: Date,
+        otherTerms: { type: String, default: '' },
         revisionsAllowed: { type: Number, default: INCLUDED_REVISIONS },
         // Which offer version these binding terms came from (§11 — terms are
         // never edited in place; they are adopted from an accepted offer).
@@ -170,8 +196,60 @@ const dealSchema = new Schema({
         agreedAt: Date,
     },
 
-    /** Which offer produced this deal (§4 — an accepted offer creates a deal). */
+    /** Which proposal version the deal's current terms came from. */
     sourceOffer: { type: Schema.Types.ObjectId, index: true },
+
+    /**
+     * ── The final agreed terms ─────────────────────────────────────────────
+     *
+     * Written once, when the second party confirms, and never again. `terms`
+     * above is the working copy — it changes each time a proposal is accepted
+     * during negotiation. This is the frozen record of what was actually agreed,
+     * stamped with the proposal version it came from and the moment it locked.
+     *
+     * The two are separate on purpose. A single mutable `terms` object can only
+     * answer "what are the terms now", and the question that matters in a
+     * dispute is "what did both parties agree to, and when" — which a field
+     * that anything may still write cannot answer honestly.
+     *
+     * Nothing writes here outside `terms.service.js`, and `assertTermsEditable`
+     * refuses any edit to a deal whose state is in TERMS_LOCKED_STATES.
+     */
+    agreedTerms: {
+        amount: Number,
+        deliverables: String,
+        contentItems: {
+            type: [{
+                contentType: String, quantity: Number, platform: String, notes: String, _id: false,
+            }],
+            default: undefined,
+        },
+        guidelines: {
+            dos: { type: [String], default: undefined },
+            donts: { type: [String], default: undefined },
+            hashtags: { type: [String], default: undefined },
+            mentions: { type: [String], default: undefined },
+            notes: String,
+        },
+        startDate: Date,
+        deadline: Date,
+        usageRights: {
+            licenceType: String,
+            durationMonths: Number,
+            paidAdvertising: Boolean,
+            whitelisting: Boolean,
+            modificationAllowed: Boolean,
+            notes: String,
+        },
+        exclusivity: String,
+        otherTerms: String,
+        revisionsAllowed: Number,
+
+        /** Provenance: which proposal, and when it became binding. */
+        fromOffer: { type: Schema.Types.ObjectId },
+        fromOfferSeq: Number,
+        lockedAt: Date,
+    },
 
     /**
      * 48-hour escrow funding window (§6, A49). Set when the brand clicks

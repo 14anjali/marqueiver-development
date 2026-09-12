@@ -407,6 +407,8 @@ export const api = {
   deleteAccount: (reason) => req('/api/users/me', { method: 'DELETE', body: { confirm: 'DELETE', reason } }),
 
   // Structured negotiation (scope §11/§12) — offers are versioned records.
+  /** The negotiation on a collaboration: thread plus every proposal version. */
+  getNegotiation: (dealId) => req(`/api/deals/${dealId}/negotiation`),
   createOffer: (dealId, terms) => req(`/api/deals/${dealId}/offers`, { method: 'POST', body: terms }),
   acceptOffer: (dealId, offerId) => req(`/api/deals/${dealId}/offers/${offerId}/accept`, { method: 'POST' }),
   rejectOffer: (dealId, offerId, note) => req(`/api/deals/${dealId}/offers/${offerId}/reject`, { method: 'POST', body: { note } }),

@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { Deal } from '../../models/index.js';
+import { Deal, Offer } from '../../models/index.js';
 import { ApiError } from '../../utils/apiError.js';
 import { transitionDeal } from './deals.service.js';
 import { notify, dealPayload } from '../notifications/notifications.service.js';
@@ -71,6 +71,38 @@ export async function confirmTerms({ dealId, actorId, actorRole }) {
 
     // Second confirmation — terms are agreed and now immutable.
     deal.termsConfirmation.agreedAt = new Date();
+
+    /**
+     * ── The final agreed terms ─────────────────────────────────────────────
+     *
+     * Generated here and written once. `deal.terms` is the working copy that
+     * each accepted proposal overwrites; this is the frozen record of what the
+     * two parties actually bound themselves to, stamped with the proposal
+     * version it came from.
+     *
+     * Usage rights and exclusivity are read from the top level, because that is
+     * where acceptance put them (Policy 5.2) — copying them in means the frozen
+     * record is complete on its own, and nobody reading it later has to know
+     * which other field to also go and look at.
+     */
+    const t = deal.terms?.toObject?.() ?? deal.terms ?? {};
+    const source = await Offer.findById(deal.sourceOffer).select('seq').lean().catch(() => null);
+
+    deal.agreedTerms = {
+        amount: t.amount,
+        deliverables: t.deliverables,
+        contentItems: t.contentItems,
+        guidelines: t.guidelines,
+        startDate: t.startDate,
+        deadline: t.deadline,
+        usageRights: deal.usageRights?.toObject?.() ?? deal.usageRights,
+        exclusivity: deal.exclusivity,
+        otherTerms: t.otherTerms,
+        revisionsAllowed: t.revisionsAllowed,
+        fromOffer: deal.sourceOffer ?? undefined,
+        fromOfferSeq: source?.seq,
+        lockedAt: new Date(),
+    };
 
     /**
      * Policy 14.7 — "changes will not affect Collaborations already accepted".

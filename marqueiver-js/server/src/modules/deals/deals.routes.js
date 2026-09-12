@@ -31,6 +31,8 @@ router.post('/:id/additional-terms/respond', requireRole('creator'), validate(c.
 router.post('/:id/additional-terms/payment-session', requireRole('brand'), requireCompliance, c.startAdditionalTermsPayment);
 
 // Negotiation (scope §11, §12) — both parties, state checked in the service.
+// The proposal history is a read: it opens no thread and changes nothing.
+router.get('/:id/negotiation', c.getNegotiation);
 router.post('/:id/offers', validate(c.offerSchema), c.createOffer);
 router.post('/:id/offers/:offerId/accept', c.acceptOfferHandler);
 router.post('/:id/offers/:offerId/reject', validate(c.rejectOfferSchema), c.rejectOfferHandler);

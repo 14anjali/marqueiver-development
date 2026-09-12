@@ -2,13 +2,13 @@ import { z } from 'zod';
 import { Types } from 'mongoose';
 import { catchAsync, ApiError } from '../../utils/apiError.js';
 import { ok, created } from '../../utils/respond.js';
-import { Deal, User, CreatorProfile } from '../../models/index.js';
+import { Deal, User, CreatorProfile, Offer } from '../../models/index.js';
 import { INCLUDED_REVISIONS } from '../../models/Deal.js';
 import { transitionDeal, listDealsForUser, createPaymentSession } from './deals.service.js';
 import { canRequestRevision, canCancel, REVIEW_WINDOW_DAYS, RESOLUTION_AUTO_DAYS } from './dealStateMachine.js';
 import { brandCancellationOutcome, creatorCancellationOutcome } from '../../services/commission.service.js';
 import * as additionalTerms from './additionalTerms.service.js';
-import { postOffer, acceptOffer, rejectOffer, rejectDeal, confirmTerms } from './negotiation.service.js';
+import { postOffer, acceptOffer, rejectOffer, rejectDeal, confirmTerms, threadForDeal } from './negotiation.service.js';
 import { notify, dealPayload } from '../notifications/notifications.service.js';
 import { DEAL_STATES } from '../../../../shared/types.js';
 /**
@@ -332,15 +332,60 @@ export const confirmDisclosure = catchAsync(async (req, res) => {
  * Both parties may hold a live offer at once; immutability, not turn-taking,
  * is what stops terms being silently revised. */
 
+/**
+ * A proposal, as one party sends it.
+ *
+ * Every field is a term of the work rather than a price with a covering note,
+ * because a counter-proposal has to be able to say "the money is fine, the
+ * usage rights are not" — and with an amount-only offer it could not. The
+ * vocabulary is the campaign brief's, so a proposal that followed an
+ * application and one sent to a creator found in discovery read the same.
+ *
+ * `.strict()`: a misspelled field used to be dropped silently, which on a
+ * document that becomes binding is the worst possible failure.
+ */
 export const offerSchema = z.object({
     amount: z.number().min(0),
-    deliverables: z.string().default(''),
+    deliverables: z.string().max(4000).default(''),
+
+    /** Content type and quantity as rows, not a sentence. */
+    contentItems: z.array(z.object({
+        contentType: z.string().min(1).max(60),
+        quantity: z.number().int().min(1).max(500).default(1),
+        platform: z.string().max(40).optional(),
+        notes: z.string().max(500).optional(),
+    })).max(20).optional(),
+
+    guidelines: z.object({
+        dos: z.array(z.string().max(300)).max(20).optional(),
+        donts: z.array(z.string().max(300)).max(20).optional(),
+        hashtags: z.array(z.string().max(60)).max(20).optional(),
+        mentions: z.array(z.string().max(60)).max(20).optional(),
+        notes: z.string().max(2000).optional(),
+    }).optional(),
+
+    /** Timeline: when work starts, and when it is due. */
+    startDate: z.string().optional(),
     deadline: z.string().optional(),
-    revisionsAllowed: z.number().min(0).optional(),
+
+    /** Policy 8 — scope, and therefore negotiable. */
+    usageRights: z.object({
+        licenceType: z.enum(['default', 'extended', 'full_assignment']).optional(),
+        durationMonths: z.number().int().min(1).max(120).optional(),
+        paidAdvertising: z.boolean().optional(),
+        whitelisting: z.boolean().optional(),
+        modificationAllowed: z.boolean().optional(),
+        notes: z.string().max(1000).optional(),
+    }).optional(),
+    exclusivity: z.string().max(500).optional(),
+    otherTerms: z.string().max(2000).optional(),
+
+    revisionsAllowed: z.number().min(0).max(10).optional(),
+
     // Optional, chosen by the proposer (§4).
     expiresAt: z.string().optional(),
     note: z.string().max(500).optional(),
-});
+}).strict();
 
 function party(req) {
     if (req.auth.role !== 'brand' && req.auth.role !== 'creator')
@@ -349,13 +394,38 @@ function party(req) {
 }
 
 export const createOffer = catchAsync(async (req, res) => {
-    const deal = await postOffer({
+    const offer = await postOffer({
         dealId: req.params.id,
         actorId: req.auth.sub,
         actorRole: party(req),
         terms: req.body,
     });
-    created(res, deal);
+    created(res, offer);
+});
+
+/**
+ * The negotiation on a collaboration: the thread and every proposal version.
+ *
+ * There was no way to read this. The panel read `deal.offers`, a field removed
+ * when offers moved to their own collection, so it rendered an empty history
+ * for every negotiation and could never find the accepted proposal it needed in
+ * order to show the confirm step.
+ *
+ * A read does not open a thread — `create: false`. Looking at a collaboration
+ * must not create state, and a deal that has not reached negotiation yet
+ * correctly answers "no proposals".
+ */
+export const getNegotiation = catchAsync(async (req, res) => {
+    const { deal, thread } = await threadForDeal(req.params.id);
+
+    const isParty = [deal.brand.toString(), deal.creator.toString()].includes(req.auth.sub);
+    if (!isParty && req.auth.role !== 'admin') throw ApiError.forbidden();
+
+    if (!thread) return ok(res, { thread: null, offers: [] });
+
+    // Newest first — the version a person needs to act on is the latest one.
+    const offers = await Offer.find({ thread: thread._id }).sort({ seq: -1 });
+    ok(res, { thread: thread.toJSON(), offers: offers.map((o) => o.toJSON()) });
 });
 
 export const acceptOfferHandler = catchAsync(async (req, res) => {

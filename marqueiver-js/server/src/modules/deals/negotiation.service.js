@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import { Deal, NegotiationThread, Offer } from '../../models/index.js';
 import { INCLUDED_REVISIONS } from '../../models/Deal.js';
+import { termsOf } from '../../models/Negotiation.js';
 import { ApiError } from '../../utils/apiError.js';
 import { notify, dealPayload } from '../notifications/notifications.service.js';
 import { transitionDeal } from './deals.service.js';
@@ -16,13 +17,20 @@ import { canDeclineBrief } from './dealStateMachine.js';
 export { confirmTerms, unconfirmTerms, bothConfirmed, assertTermsEditable } from './terms.service.js';
 
 /**
+ * Also imported, not only re-exported. `export … from` re-publishes a name
+ * without binding it locally, so the guard was reachable by every other module
+ * and not by this one — which is part of why nothing here ever called it.
+ */
+import { assertTermsEditable } from './terms.service.js';
+
+/**
  * Structured negotiation — cleared rules §3, §4, §5 and A52–A56.
  *
  * This replaces the earlier single-outstanding-offer model, which the cleared
  * rules overruled. The differences that matter:
  *
- *  - Offers live in their own collection on a NegotiationThread (B2), because
- *    accepting one spawns a **separate deal** and a subdocument cannot do that.
+ *  - Offers live in their own collection on a NegotiationThread (B2), so each
+ *    version is its own immutable row and nothing is ever overwritten.
  *  - Both parties may have a live offer at the same time; only one **each**
  *    (A55). Accepting one does not touch the other (§4).
  *  - Offers can never be withdrawn (§4). The protection against a party
@@ -30,6 +38,25 @@ export { confirmTerms, unconfirmTerms, bothConfirmed, assertTermsEditable } from
  *  - Expiry is evaluated lazily at accept time (A53) — a missing cron can never
  *    make a stale offer acceptable.
  *  - The thread closes as soon as an offer is accepted (B2 follow-up).
+ *
+ * ── This stage was not reachable ───────────────────────────────────────────
+ *
+ * Three independent breaks meant no proposal could be sent or read at all, and
+ * none of them produced an error anyone would notice:
+ *
+ *  1. `postOffer` takes a `threadId`; the controller passed it `dealId`. Every
+ *     attempt to send a proposal resolved no thread and 404'd.
+ *  2. Only campaign selection opened a thread. A creator accepting a direct
+ *     requirement reached `negotiation` with no thread in existence, so even a
+ *     fixed call would have had nowhere to write.
+ *  3. The panel read `deal.offers`, which is not a path on the Deal schema —
+ *     it was removed when offers moved to this collection. It rendered an empty
+ *     history for every negotiation, forever.
+ *
+ * `threadForDeal` below is the answer to the first two: the deal is the address,
+ * and the thread is found or opened from it. That also makes the two entry
+ * routes identical here by construction rather than by both remembering to call
+ * `openThread`.
  */
 
 const MAX_PENDING_PER_THREAD = 10; // A56
@@ -42,6 +69,89 @@ function assertParty(thread, actorId, actorRole) {
 
 const counterpartOf = (thread, role) =>
     (role === 'creator' ? thread.brand : thread.creator).toString();
+
+/**
+ * The negotiation thread for a deal, opened if this is the first proposal.
+ *
+ * Distinct from `openThread`, which is the invitation handshake and enforces
+ * that the *receiving* party accepts. By the time a deal is in `negotiation`
+ * that handshake has already happened — whichever route it came through — so
+ * this neither repeats it nor lets it be skipped.
+ *
+ * `create: false` is a read: it returns null rather than opening a thread, so
+ * merely looking at a collaboration does not create state.
+ */
+export async function threadForDeal(dealId, { create = false } = {}) {
+    const deal = await Deal.findById(dealId);
+    if (!deal) throw ApiError.notFound('Collaboration not found');
+
+    const existing = await NegotiationThread.findOne({ originDeal: deal._id })
+        .sort({ createdAt: -1 });
+    if (existing || !create) return { deal, thread: existing ?? null };
+
+    if (deal.state !== 'negotiation') {
+        throw ApiError.unprocessable(
+            deal.state === 'invitation'
+                ? 'The request has to be accepted before proposals can be exchanged'
+                : `Proposals can only be exchanged during negotiation — this collaboration is ${deal.state}`,
+        );
+    }
+
+    const thread = await NegotiationThread.create({
+        brand: deal.brand,
+        creator: deal.creator,
+        originDeal: deal._id,
+        campaign: deal.campaign,
+        title: deal.title,
+        status: 'open',
+    });
+
+    await seedFirstProposal(deal, thread);
+    return { deal, thread };
+}
+
+/**
+ * The opening requirement, recorded as Proposal V1.
+ *
+ * Without this the history starts at whatever the first counter happened to be,
+ * and "V2" would be the first thing either party ever saw — which reads as a
+ * version having gone missing. It also matters for the record: the terms on the
+ * deal at this point are real terms somebody proposed, and if the other party
+ * simply accepts them there has to be a version to point at.
+ *
+ * Authored by whoever made the request, which is exactly `requestedBy`: the
+ * brand on a direct requirement, the creator on a campaign application. So the
+ * two routes seed the same way without either one knowing about the other.
+ *
+ * Deliberately no expiry: an opening position that quietly expires would leave
+ * a negotiation with no proposals in it and nothing explaining why.
+ */
+async function seedFirstProposal(deal, thread) {
+    const existing = await Offer.findOne({ thread: thread._id }).select('_id').lean();
+    if (existing) return null;
+
+    const byRole = deal.requestedBy === 'creator' ? 'creator' : 'brand';
+    const by = byRole === 'creator' ? deal.creator : deal.brand;
+    const t = deal.terms?.toObject?.() ?? deal.terms ?? {};
+
+    return Offer.create({
+        thread: thread._id,
+        seq: 1,
+        by,
+        byRole,
+        amount: t.amount ?? 0,
+        deliverables: t.deliverables ?? '',
+        contentItems: t.contentItems ?? [],
+        guidelines: t.guidelines ?? {},
+        startDate: t.startDate,
+        deadline: t.deadline,
+        usageRights: deal.usageRights?.toObject?.() ?? deal.usageRights ?? undefined,
+        exclusivity: deal.exclusivity ?? '',
+        otherTerms: t.otherTerms ?? '',
+        revisionsAllowed: t.revisionsAllowed ?? INCLUDED_REVISIONS,
+        note: 'The opening requirement, as sent.',
+    });
+}
 
 /**
  * Opens the thread when the receiving party accepts a request/invitation (§3).
@@ -71,10 +181,16 @@ export async function openThread({ deal, actorId, actorRole }) {
 }
 
 /** Post an offer. Either party, at any point while the thread is open. */
-export async function postOffer({ threadId, actorId, actorRole, terms }) {
-    const thread = await NegotiationThread.findById(threadId);
-    if (!thread) throw ApiError.notFound('Negotiation not found');
+export async function postOffer({ dealId, actorId, actorRole, terms }) {
+    // Addressed by deal, not by thread: that is what the route already passes,
+    // and it is what makes the two entry routes converge here.
+    const { deal, thread } = await threadForDeal(dealId, { create: true });
     assertParty(thread, actorId, actorRole);
+
+    // §5 / non-negotiable rule 8 — once terms are agreed they are immutable, and
+    // a new proposal is an edit to them. This was written as a guard and never
+    // called anywhere; a proposal on a funded deal would have been accepted.
+    assertTermsEditable(deal);
 
     if (thread.status !== 'open')
         throw ApiError.unprocessable('This negotiation is closed');
@@ -96,6 +212,16 @@ export async function postOffer({ threadId, actorId, actorRole, terms }) {
     if (terms.expiresAt && new Date(terms.expiresAt) <= new Date())
         throw ApiError.unprocessable('Expiry must be in the future');
 
+    /*
+      A timeline that runs backwards is not a position anyone can accept, so it
+      is refused at the point of proposing rather than discovered by whoever has
+      to respond to it. Same rule the campaign wizard applies to its own dates.
+    */
+    if (terms.startDate && terms.deadline
+        && new Date(terms.startDate) > new Date(terms.deadline)) {
+        throw ApiError.unprocessable('Work cannot start after the deadline it is due');
+    }
+
     const last = await Offer.findOne({ thread: thread._id }).sort({ seq: -1 }).select('seq').lean();
 
     const offer = await Offer.create({
@@ -105,7 +231,13 @@ export async function postOffer({ threadId, actorId, actorRole, terms }) {
         byRole: actorRole,
         amount: terms.amount,
         deliverables: terms.deliverables ?? '',
+        contentItems: terms.contentItems ?? [],
+        guidelines: terms.guidelines ?? {},
+        startDate: terms.startDate ? new Date(terms.startDate) : undefined,
         deadline: terms.deadline ? new Date(terms.deadline) : undefined,
+        usageRights: terms.usageRights ?? undefined,
+        exclusivity: terms.exclusivity ?? '',
+        otherTerms: terms.otherTerms ?? '',
         revisionsAllowed: terms.revisionsAllowed ?? INCLUDED_REVISIONS,
         note: terms.note,
         expiresAt: terms.expiresAt ? new Date(terms.expiresAt) : undefined,
@@ -126,8 +258,24 @@ export async function postOffer({ threadId, actorId, actorRole, terms }) {
 }
 
 /**
- * Accept an offer. Spawns a **new deal** carrying that offer's terms, and
- * closes the thread (B2 follow-up).
+ * Accept a proposal. Its terms land on the collaboration being negotiated, and
+ * the thread closes (B2 follow-up).
+ *
+ * ── Why this no longer spawns a deal ───────────────────────────────────────
+ *
+ * §4 used to say an accepted offer creates a separate deal. It did — and left
+ * the original one at `negotiation` with nothing that would ever move it, so a
+ * single piece of work appeared twice in both parties' lists and only the newer
+ * of the two was real. Applying the terms to the collaboration they were
+ * negotiated for is both simpler and what the parties think is happening. The
+ * rule change is recorded in models/Negotiation.js.
+ *
+ * ── Every term, not four of them ───────────────────────────────────────────
+ *
+ * The old copy took amount, deliverables, deadline and revisions. Usage rights
+ * were negotiable, were negotiated, and were then dropped on the floor — the
+ * deal kept whatever the schema defaulted to. `termsOf` is now the single
+ * definition of what a term is, so acceptance and the final lock cannot drift.
  *
  * Note what is deliberately NOT done here: the other pending offers are left
  * alone (§4, non-negotiable rule 13). They stop being acceptable only because
@@ -155,48 +303,62 @@ export async function acceptOffer({ offerId, actorId, actorRole }) {
         throw ApiError.unprocessable('That offer has expired. Ask for a new one.');
     }
 
-    // §4 — the accepted offer produces its own deal, with terms copied from
-    // the offer version so they are always traceable to something both parties
-    // saw. The deal starts at `negotiating`: terms still need dual confirmation
-    // (§5) before it can move to terms_agreed.
-    const deal = await Deal.create({
-        brand: thread.brand,
-        creator: thread.creator,
-        campaign: thread.campaign,
-        title: thread.title || 'Collaboration',
-        state: 'negotiation',
-        sourceOffer: offer._id,
-        terms: {
-            amount: offer.amount,
-            deliverables: offer.deliverables,
-            deadline: offer.deadline,
-            revisionsAllowed: offer.revisionsAllowed,
-        },
-        /**
-         * The commission rate is not snapshotted here.
-         *
-         * Policy 14.7 ties the applicable rate to acceptance of the *terms*,
-         * which is `terms.service.js` — a deal at `negotiation` has nothing
-         * agreed yet. Writing a rate at this point would fix it before the
-         * creator had seen the terms it applies to.
-         *
-         * The `fees` block that used to be written here came from
-         * platformFee.js and was never declared on the Deal schema, so strict
-         * mode discarded it on every save. Escrow holds the agreed value and
-         * nothing more (Policy 14.5).
-         */
-        escrow: { amount: offer.amount },
-        timeline: [{
-            from: null, to: 'negotiation',
-            by: new Types.ObjectId(actorId), byRole: actorRole,
-            note: `Created from accepted offer #${offer.seq}`,
-            at: new Date(),
-        }],
+    const deal = await Deal.findById(thread.originDeal);
+    if (!deal) throw ApiError.notFound('Collaboration not found');
+    assertTermsEditable(deal);
+
+    /*
+      The terms of the accepted version, applied to this collaboration. Usage
+      rights and exclusivity go to the top level, which Policy 5.2 designates as
+      the agreed scope; everything else goes into `terms`. One home each.
+    */
+    const t = termsOf(offer);
+
+    deal.sourceOffer = offer._id;
+    deal.terms = {
+        ...(deal.terms?.toObject?.() ?? deal.terms ?? {}),
+        amount: t.amount,
+        deliverables: t.deliverables ?? '',
+        contentItems: t.contentItems ?? [],
+        guidelines: t.guidelines ?? {},
+        startDate: t.startDate,
+        deadline: t.deadline,
+        otherTerms: t.otherTerms ?? '',
+        revisionsAllowed: t.revisionsAllowed,
+        acceptedOffer: offer._id,
+    };
+    if (t.usageRights) deal.usageRights = { ...(deal.usageRights ?? {}), ...t.usageRights };
+    if (t.exclusivity !== undefined) deal.exclusivity = t.exclusivity;
+
+    // `contentTypes` is the flat list the rest of the app reads; derive it so it
+    // cannot disagree with the rows it is derived from.
+    if (t.contentItems?.length) {
+        deal.contentTypes = [...new Set(t.contentItems.map((i) => i.contentType).filter(Boolean))];
+    }
+
+    /**
+     * Escrow holds the agreed value and nothing more (Policy 14.5). The
+     * commission rate is deliberately NOT snapshotted here: Policy 14.7 ties it
+     * to acceptance of the *terms*, which is the dual confirmation in
+     * terms.service.js. A deal still at `negotiation` has nothing agreed yet,
+     * and fixing a rate now would fix it before the second party had confirmed
+     * the terms it applies to.
+     */
+    deal.escrow = { ...(deal.escrow?.toObject?.() ?? deal.escrow ?? {}), amount: t.amount };
+
+    deal.timeline.push({
+        from: deal.state, to: deal.state,
+        by: new Types.ObjectId(actorId), byRole: actorRole,
+        note: `Proposal V${offer.seq} accepted — terms applied`,
+        at: new Date(),
     });
+    await deal.save();
 
     offer.status = 'accepted';
     offer.respondedBy = new Types.ObjectId(actorId);
     offer.respondedAt = new Date();
+    // Legacy field name — it now records the deal the terms were applied to,
+    // which for every row written since the rule change is the origin deal.
     offer.spawnedDeal = deal._id;
     await offer.save();
 
@@ -209,8 +371,8 @@ export async function acceptOffer({ offerId, actorId, actorRole }) {
     await notify({
         user: counterpartOf(thread, actorRole),
         type: 'offer.accepted',
-        title: 'Offer accepted',
-        body: `Your offer on "${thread.title}" was accepted. Confirm the terms to continue.`,
+        title: 'Proposal accepted',
+        body: `Proposal V${offer.seq} on "${thread.title}" was accepted. Confirm the terms to make them final.`,
         data: dealPayload(deal),
     }).catch(() => void 0);
 

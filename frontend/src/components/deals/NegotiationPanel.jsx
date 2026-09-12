@@ -1,24 +1,37 @@
-import { useState } from 'react';
-import { Handshake, Check, Clock } from '../icons';
+import { useCallback, useEffect, useState } from 'react';
+import { Handshake, Check, Clock, Lock } from '../icons';
+import ProposalTerms from './ProposalTerms';
+import ProposalComposer from './ProposalComposer';
 import { api } from '../../lib/api';
 import { Spinner, useToast } from '../../lib/ui-state';
 import { rupee } from '../../lib/normalize';
 
 /**
- * Negotiation workspace (scope §12).
+ * The proposal stage: the same one for both routes into a collaboration.
  *
- * Everything required by §12 is rendered from backend data — current offer,
- * proposed amount, deliverables, deadline, terms, accept/counter/reject
- * actions, full offer history with who proposed what and when, and a clear
- * current-state indicator. Nothing here is hardcoded.
+ * Proposal V1 → counter V2 → … → one version accepted → both parties confirm →
+ * final terms locked. Every version is a separate immutable record; countering
+ * writes a new one and never touches the one it answers.
  *
- * The panel is only shown while terms are actually open (`invited` /
- * `negotiating`); once a deal is accepted the history stays visible but the
- * actions disappear, because reopening agreed terms is an unresolved question
- * in scope §15.
+ * ── This panel did not work at all ─────────────────────────────────────────
+ *
+ * Three bugs, none of which produced a visible error:
+ *
+ *  1. `OPEN_STATES = ['negotiating']`. The state is `negotiation` — the `-ing`
+ *     spelling is one of the invented names `lib/chart-theme.js` already
+ *     records as never having existed. So `isOpen` was false for every deal
+ *     that has ever existed, and the entire action set — send, accept, reject,
+ *     counter — rendered for nobody.
+ *  2. It read `deal.offers`. That path was removed from the Deal schema when
+ *     offers moved to their own collection, so the history was permanently
+ *     empty and the accepted proposal was never found, which meant the confirm
+ *     step never appeared either.
+ *  3. Behind both, the API call it would have made was broken anyway: the
+ *     route handed `postOffer` a deal id where it expected a thread id.
+ *
+ * Offers now come from `GET /deals/:id/negotiation`, which is the collection
+ * the rest of the system actually writes to.
  */
-
-const OPEN_STATES = ['negotiating'];
 
 const STATUS_STYLE = {
   proposed: 'pill-live',
@@ -27,40 +40,59 @@ const STATUS_STYLE = {
   expired: 'pill-quiet',
 };
 
-function fmtDate(d) {
-  return d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
-}
+const when = (d) => (d ? new Date(d).toLocaleString('en-IN', {
+  day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit',
+}) : '');
 
 export default function NegotiationPanel({ deal, role, onUpdated }) {
   const toast = useToast();
   const [busy, setBusy] = useState('');
-  const [countering, setCountering] = useState(false);
-  const [form, setForm] = useState({
-    amount: deal.terms?.amount ?? 0,
-    deliverables: deal.terms?.deliverables ?? '',
-    deadline: deal.terms?.deadline ? new Date(deal.terms.deadline).toISOString().slice(0, 10) : '',
-    expiresAt: '',
-    note: '',
-  });
+  const [composing, setComposing] = useState(false);
+  const [offers, setOffers] = useState(null);
+  const [openHistory, setOpenHistory] = useState(false);
 
-  const offers = [...(deal.offers || [])].sort((a, b) => b.seq - a.seq);
-  // §4 — multiple offers may be open at once, from either party.
-  const pending = offers.filter((o) => o.status === 'proposed');
-  const forMe = pending.filter((o) => o.byRole !== role);
-  const mine = pending.filter((o) => o.byRole === role);
-  const isOpen = OPEN_STATES.includes(deal.state);
+  const load = useCallback(async () => {
+    try {
+      const { data } = await api.getNegotiation(deal._id);
+      setOffers(data?.offers ?? []);
+    } catch {
+      // A collaboration that has not reached negotiation has no thread, and
+      // that is a normal answer rather than a failure worth shouting about.
+      setOffers([]);
+    }
+  }, [deal._id]);
 
-  const accepted = offers.find((o) => o.status === 'accepted');
+  useEffect(() => { load(); }, [load]);
+
+  const sorted = [...(offers ?? [])].sort((a, b) => b.seq - a.seq);
+  const live = sorted.filter((o) => (o.effectiveStatus ?? o.status) === 'proposed');
+  const forMe = live.filter((o) => o.byRole !== role);
+  const mine = live.filter((o) => o.byRole === role);
+  const accepted = sorted.find((o) => o.status === 'accepted');
+  const latest = sorted[0];
+
+  const isOpen = deal.state === 'negotiation';
+  const locked = Boolean(deal.agreedTerms?.lockedAt);
   const myConfirm = deal.termsConfirmation?.[role]?.at;
   const theirConfirm = deal.termsConfirmation?.[role === 'brand' ? 'creator' : 'brand']?.at;
 
-  async function run(key, fn) {
+  /**
+   * Every action here can change both the deal and the proposal list, and the
+   * three endpoints return different shapes — an offer, `{ deal, offer, thread }`,
+   * `{ deal, agreed }`. Rather than decoding which is which, the deal is taken
+   * from the response when it is there and re-fetched by the parent when it is
+   * not (`onUpdated(null)`, the convention AdditionalTermsPanel already uses).
+   * A stale panel after accepting reads as the action having failed.
+   */
+  async function run(key, fn, message) {
     setBusy(key);
     try {
       const { data } = await fn();
-      onUpdated(data);
-      toast.push('Updated', 'success');
-      setCountering(false);
+      const nextDeal = data?.deal ?? (data?._id === deal._id ? data : null);
+      await load();
+      onUpdated?.(nextDeal);
+      toast.push(message ?? 'Updated', 'success');
+      setComposing(false);
     } catch (e) {
       toast.push(e.message, 'error');
     } finally {
@@ -68,209 +100,236 @@ export default function NegotiationPanel({ deal, role, onUpdated }) {
     }
   }
 
-  const accept = (id) => run('accept' + id, () => api.acceptOffer(deal._id, id));
-  const reject = (id) => run('reject' + id, () => api.rejectOffer(deal._id, id));
-  const confirm = () => run('confirm', () => api.confirmTerms(deal._id));
-  const counter = () => {
-    const amount = Number(form.amount);
-    if (!amount || amount < 0) { toast.push('Enter a valid amount', 'error'); return; }
-    return run('counter', () => api.createOffer(deal._id, {
-      amount,
-      deliverables: form.deliverables,
-      deadline: form.deadline || undefined,
-      expiresAt: form.expiresAt || undefined,
-      note: form.note || undefined,
-    }));
-  };
+  const accept = (o) => run(`accept${o._id}`, () => api.acceptOffer(deal._id, o._id),
+    `Proposal V${o.seq} accepted — both of you now confirm to make it final`);
+  const reject = (o) => run(`reject${o._id}`, () => api.rejectOffer(deal._id, o._id),
+    `Proposal V${o.seq} declined`);
+  const confirm = () => run('confirm', () => api.confirmTerms(deal._id), 'Confirmed');
+  const sendProposal = (terms) => run('send', () => api.createOffer(deal._id, terms), 'Proposal sent');
+
+  const nextVersion = (sorted[0]?.seq ?? 0) + 1;
+
+  /** The version a counter starts from: the one being answered, else the latest. */
+  const basis = forMe[0] ?? latest ?? null;
 
   return (
     <div className="card p-5">
-      <div className="flex items-center justify-between gap-4 mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h3 className="font-display font-bold text-ink flex items-center gap-2">
-          <Handshake className="w-5 h-5 text-brand-600" /> Negotiation
+          <Handshake className="w-5 h-5 text-brand-600" /> Proposal
         </h3>
-        {/* §12 — clear current-state indicator. */}
-        <span className={forMe.length || (accepted && !myConfirm) ? 'pill-live' : 'pill-quiet'}>
-          {!isOpen ? (deal.termsConfirmation?.agreedAt ? 'Terms agreed' : deal.state)
+        <span className={forMe.length || (accepted && !myConfirm && isOpen) ? 'pill-live' : 'pill-quiet'}>
+          {locked ? 'Final terms accepted'
+            : !isOpen ? 'Not open'
             : accepted && !myConfirm ? 'Your confirmation needed'
-            : forMe.length ? `${forMe.length} offer${forMe.length > 1 ? 's' : ''} to review`
-            : mine.length ? 'Waiting on the other party'
-            : 'No open offers'}
+            : accepted ? 'Waiting on their confirmation'
+            : forMe.length ? `V${forMe[0].seq} needs your answer`
+            : mine.length ? `V${mine[0].seq} sent — waiting`
+            : 'No proposal yet'}
         </span>
       </div>
 
-      {/* §5 — an accepted offer still needs BOTH parties to confirm before
-          terms are agreed and locked. */}
-      {accepted && !deal.termsConfirmation?.agreedAt && (
-        <div className="wash p-4 mb-4">
-          <div className="text-xs text-muted">Accepted offer #{accepted.seq} — awaiting confirmation</div>
-          <div className="money-lg mt-1">{rupee(accepted.amount)}</div>
-          <p className="text-sm text-muted mt-1">
-            {accepted.deliverables || 'No deliverables specified'}
-            {accepted.deadline ? `, due ${fmtDate(accepted.deadline)}` : ''}
-          </p>
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            {myConfirm ? (
-              <span className="pill-done"><Check className="w-3 h-3" /> You confirmed</span>
-            ) : (
-              <button onClick={confirm} disabled={!!busy} className="btn-cta">
-                {busy === 'confirm' ? <Spinner /> : 'Confirm terms'}
-              </button>
-            )}
-            <span className={theirConfirm ? 'pill-done' : 'pill-quiet'}>
-              {theirConfirm ? 'Other party confirmed' : 'Waiting on the other party'}
-            </span>
-          </div>
-          <p className="text-xs text-muted mt-3">
-            Once both sides confirm, the amount, deliverables, deadline and revision limit are locked.
-          </p>
+      {offers === null ? (
+        <div className="py-6 grid place-items-center" role="status" aria-live="polite">
+          <span className="sr-only">Loading proposals…</span>
+          <Spinner className="w-5 h-5" />
         </div>
-      )}
-
-      {/* Offers awaiting your response. There may be several at once (§4). */}
-      {isOpen && forMe.length > 0 && (
-        <div className="space-y-3">
-          {forMe.map((o) => (
-            <div key={o._id} className="wash p-4">
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="text-xs text-muted">Offer #{o.seq} from the {o.byRole}</span>
-                <span className="text-xs text-muted">
-                  {o.expiresAt ? `expires ${fmtDate(o.expiresAt)}` : fmtDate(o.createdAt)}
+      ) : (
+        <>
+          {/* ── the locked final terms ─────────────────────────────────── */}
+          {locked && (
+            <div className="rounded-xl2 border border-jade-200 bg-jade-50/50 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                <p className="text-sm font-semibold text-ink inline-flex items-center gap-1.5">
+                  <Lock className="w-4 h-4 text-jade-700" /> Final agreed terms
+                </p>
+                <span className="pill-done">
+                  {deal.agreedTerms.fromOfferSeq ? `from V${deal.agreedTerms.fromOfferSeq}` : 'agreed'}
                 </span>
               </div>
-              <div className="money-lg mt-1">{rupee(o.amount)}</div>
-              <dl className="mt-3 space-y-1.5 text-sm">
-                <Term label="Deliverables" value={o.deliverables || '—'} />
-                <Term label="Deadline" value={fmtDate(o.deadline)} />
-                <Term label="Revisions allowed" value={o.revisionsAllowed ?? '—'} />
-                {o.note && <Term label="Note" value={o.note} />}
-              </dl>
-              <div className="flex flex-wrap gap-2 mt-4">
-                <button onClick={() => accept(o._id)} disabled={!!busy} className="btn-cta">
-                  {busy === 'accept' + o._id ? <Spinner /> : 'Accept'}
-                </button>
-                <button onClick={() => reject(o._id)} disabled={!!busy} className="btn-ghost text-rose-500 border-rose-200">
-                  Decline this offer
-                </button>
-              </div>
+              <p className="text-xs text-muted mb-3.5">
+                Locked {when(deal.agreedTerms.lockedAt)}. These cannot be changed —
+                a change needs a new collaboration.
+              </p>
+              <ProposalTerms terms={deal.agreedTerms} />
             </div>
-          ))}
-        </div>
-      )}
+          )}
 
-      {/* Your own open offers. They cannot be withdrawn (§4). */}
-      {isOpen && mine.length > 0 && (
-        <p className="text-sm text-muted mt-3">
-          You have {mine.length} offer{mine.length > 1 ? 's' : ''} awaiting a response. Offers cannot be
-          withdrawn once sent — send a different one if the terms have changed.
-        </p>
-      )}
+          {/* ── accepted, awaiting confirmation ───────────────────────── */}
+          {accepted && !locked && (
+            <div className="rounded-xl2 border border-line bg-bg/50 p-4">
+              <p className="text-sm font-semibold text-ink">
+                Proposal V{accepted.seq} accepted — not final yet
+              </p>
+              <p className="text-xs text-muted mt-1 leading-relaxed">
+                Accepting settles which version is on the table. Both of you confirm it
+                separately, and only the second confirmation locks the terms.
+              </p>
 
-      {isOpen && (
-        <div className="mt-4">
-          {!countering ? (
-            <button onClick={() => setCountering(true)} className="btn-outline">
-              {pending.length ? 'Send another offer' : 'Send an offer'}
-            </button>
-          ) : (
-            <div className="mt-2 border-t border-line pt-4 space-y-3">
-              <Field label="Amount (₹)">
-                <input
-                  type="number" min="0" value={form.amount}
-                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                  className="field tnum"
-                />
-              </Field>
-              <Field label="Deliverables">
-                <input
-                  value={form.deliverables}
-                  onChange={(e) => setForm({ ...form, deliverables: e.target.value })}
-                  placeholder="2 reels, 3 stories"
-                  className="field"
-                />
-              </Field>
-              <Field label="Deadline">
-                <input
-                  type="date" value={form.deadline}
-                  onChange={(e) => setForm({ ...form, deadline: e.target.value })}
-                  className="field"
-                />
-              </Field>
-              <Field label="Offer expires (optional)">
-                <input
-                  type="date" value={form.expiresAt}
-                  onChange={(e) => setForm({ ...form, expiresAt: e.target.value })}
-                  className="field"
-                />
-              </Field>
-              <Field label="Note (optional)">
-                <textarea
-                  rows={2} value={form.note}
-                  onChange={(e) => setForm({ ...form, note: e.target.value })}
-                  placeholder="Why you are proposing these terms"
-                  className="field"
-                />
-              </Field>
-              <div className="flex gap-2">
-                <button onClick={counter} disabled={!!busy} className="btn-cta">
-                  {busy === 'counter' ? <Spinner /> : 'Send offer'}
-                </button>
-                <button onClick={() => setCountering(false)} className="btn-ghost">Cancel</button>
+              <div className="mt-3.5"><ProposalTerms terms={accepted} compact /></div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                {myConfirm ? (
+                  <span className="pill-done"><Check className="w-3 h-3" /> You confirmed</span>
+                ) : (
+                  <button onClick={confirm} disabled={!!busy} className="btn-cta">
+                    {busy === 'confirm' ? <Spinner className="w-4 h-4" /> : 'Confirm final terms'}
+                  </button>
+                )}
+                <span className={theirConfirm ? 'pill-done' : 'pill-quiet'}>
+                  {theirConfirm ? 'They confirmed' : 'Waiting on them'}
+                </span>
               </div>
             </div>
           )}
-        </div>
-      )}
 
-      {/* §11/§12 — full history: who offered what, and when. Nothing is dropped. */}
-      {offers.length > 0 && (
-        <div className="mt-6 border-t border-line pt-4">
-          <h4 className="text-sm font-semibold text-ink mb-3">Offer history</h4>
-          <ol className="space-y-3">
-            {offers.map((o) => (
-              <li key={o._id || o.seq} className="flex items-start gap-3">
-                <span className="w-7 h-7 rounded-full bg-bg border border-line text-muted flex items-center justify-center shrink-0 text-[11px] font-bold tnum">
-                  {o.seq}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                    <span className="money text-sm">{rupee(o.amount)}</span>
-                    <span className="text-xs text-muted">from the {o.byRole}</span>
-                    <span className={STATUS_STYLE[o.status] || 'pill-quiet'}>{o.status}</span>
+          {/* ── a proposal waiting on you ─────────────────────────────── */}
+          {isOpen && !accepted && forMe.length > 0 && (
+            <div className="space-y-3">
+              {forMe.map((o) => (
+                <div key={o._id} className="rounded-xl2 border border-brand-200 bg-brand-50/40 p-4">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <p className="text-sm font-semibold text-ink">
+                      Proposal V{o.seq} from the {o.byRole}
+                    </p>
+                    <span className="text-xs text-muted">
+                      {o.expiresAt ? `expires ${when(o.expiresAt)}` : when(o.createdAt)}
+                    </span>
                   </div>
-                  <div className="text-xs text-muted mt-0.5">
-                    {o.deliverables || 'No deliverables specified'}
-                    {o.deadline ? ` · due ${fmtDate(o.deadline)}` : ''}
+
+                  {/* Against the version before it, so what moved is visible. */}
+                  <div className="mt-3">
+                    <ProposalTerms
+                      terms={o}
+                      changedFrom={sorted.find((p) => p.seq === o.seq - 1)}
+                    />
                   </div>
-                  <div className="text-[11px] text-muted/80 mt-0.5 inline-flex items-center gap-1">
-                    <Clock className="w-3 h-3" /> {o.createdAt ? new Date(o.createdAt).toLocaleString() : ''}
-                    {o.reconstructed && ' · reconstructed from the original terms'}
+
+                  {o.note && (
+                    <p className="text-xs text-muted mt-3 leading-relaxed border-t border-brand-100 pt-3 break-words">
+                      “{o.note}”
+                    </p>
+                  )}
+
+                  <div className="flex flex-wrap gap-2 mt-4">
+                    <button onClick={() => accept(o)} disabled={!!busy} className="btn-cta">
+                      {busy === `accept${o._id}` ? <Spinner className="w-4 h-4" /> : 'Accept these terms'}
+                    </button>
+                    <button onClick={() => setComposing(true)} disabled={!!busy} className="btn-outline">
+                      Counter with V{nextVersion}
+                    </button>
+                    <button
+                      onClick={() => reject(o)} disabled={!!busy}
+                      className="btn-ghost text-rose-500 border-rose-200"
+                    >
+                      {busy === `reject${o._id}` ? <Spinner className="w-4 h-4" /> : 'Decline this version'}
+                    </button>
                   </div>
-                  {o.note && <p className="text-xs text-muted mt-1">{o.note}</p>}
                 </div>
-              </li>
-            ))}
-          </ol>
-        </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── your own outstanding proposal ─────────────────────────── */}
+          {isOpen && !accepted && mine.length > 0 && forMe.length === 0 && (
+            <div className="rounded-xl2 border border-line p-4">
+              <p className="text-sm font-semibold text-ink">
+                V{mine[0].seq} sent — waiting for the {role === 'brand' ? 'creator' : 'brand'}
+              </p>
+              <div className="mt-3"><ProposalTerms terms={mine[0]} compact /></div>
+              <p className="text-xs text-muted mt-3 leading-relaxed">
+                A proposal cannot be withdrawn once sent. If the terms have changed, wait for
+                their answer — or set an expiry on the next one.
+              </p>
+            </div>
+          )}
+
+          {isOpen && !accepted && !live.length && (
+            <div className="rounded-xl2 border border-line border-dashed p-5 text-center">
+              <p className="text-sm text-ink font-medium">No proposal on the table</p>
+              <p className="text-xs text-muted mt-1 leading-relaxed max-w-sm mx-auto">
+                Every version stays on the record, so send what you actually want rather than
+                an opening you plan to walk back.
+              </p>
+            </div>
+          )}
+
+          {/*
+            Only when there is nothing waiting on you. With a proposal on the
+            table this rendered a second "Send V3" directly beneath "Counter
+            with V3" — two buttons, same drawer, same result, and the reader
+            left to work out whether they differed.
+          */}
+          {isOpen && !accepted && forMe.length === 0 && (
+            <div className="mt-4">
+              <button onClick={() => setComposing(true)} disabled={!!busy} className="btn-outline">
+                {sorted.length ? `Send V${nextVersion}` : 'Send a proposal'}
+              </button>
+            </div>
+          )}
+
+          {/* ── version history ───────────────────────────────────────── */}
+          {sorted.length > 0 && (
+            <div className="mt-6 border-t border-line pt-4">
+              <button
+                onClick={() => setOpenHistory((v) => !v)}
+                aria-expanded={openHistory}
+                className="text-sm font-semibold text-ink focusable inline-flex items-center gap-2"
+              >
+                Version history
+                <span className="pill-quiet">{sorted.length}</span>
+              </button>
+
+              {openHistory && (
+                <ol className="mt-3.5 space-y-4">
+                  {sorted.map((o) => {
+                    const prev = sorted.find((p) => p.seq === o.seq - 1);
+                    const status = o.effectiveStatus ?? o.status;
+                    return (
+                      <li key={o._id || o.seq} className="flex items-start gap-3">
+                        <span className="w-8 h-8 rounded-full bg-bg border border-line text-muted grid place-items-center shrink-0 text-[11px] font-bold">
+                          V{o.seq}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                            <span className="money text-sm">{rupee(o.amount)}</span>
+                            <span className="text-xs text-muted">from the {o.byRole}</span>
+                            <span className={STATUS_STYLE[status] || 'pill-quiet'}>{status}</span>
+                          </div>
+                          <div className="text-[11px] text-muted/80 mt-0.5 inline-flex items-center gap-1">
+                            <Clock className="w-3 h-3" /> {when(o.createdAt)}
+                            {o.reconstructed && ' · reconstructed from the original terms'}
+                          </div>
+                          <div className="mt-2 rounded-xl2 border border-line p-3">
+                            <ProposalTerms terms={o} changedFrom={prev} compact />
+                          </div>
+                          {o.note && (
+                            <p className="text-xs text-muted mt-1.5 leading-relaxed break-words">“{o.note}”</p>
+                          )}
+                          {o.rejectionNote && (
+                            <p className="text-xs text-rose-700 mt-1.5 leading-relaxed break-words">
+                              Declined: {o.rejectionNote}
+                            </p>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </div>
+          )}
+        </>
       )}
-    </div>
-  );
-}
 
-function Term({ label, value }) {
-  return (
-    <div className="flex justify-between gap-4">
-      <dt className="text-muted">{label}</dt>
-      <dd className="text-ink font-medium text-right">{value}</dd>
+      <ProposalComposer
+        open={composing}
+        onClose={() => setComposing(false)}
+        basedOn={basis}
+        nextVersion={nextVersion}
+        onSend={sendProposal}
+        busy={busy === 'send'}
+      />
     </div>
-  );
-}
-
-function Field({ label, children }) {
-  return (
-    <label className="block">
-      <span className="field-label">{label}</span>
-      {children}
-    </label>
   );
 }

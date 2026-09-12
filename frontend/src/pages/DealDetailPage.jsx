@@ -81,6 +81,15 @@ const stepIndex = (state) => {
   return direct >= 0 ? direct : (STEP_FOR[state] ?? 0);
 };
 
+/**
+ * Date + time, with the month spelled. The numeric `en-IN` default rendered
+ * "1/9/2026", which is ambiguous to half the people reading it and disagrees
+ * with the spelled-month dates used everywhere else in the app.
+ */
+const STAMP = {
+  day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit',
+};
+
 export default function DealDetailPage() {
   const { id } = useParams();
   const nav = useNavigate();
@@ -286,7 +295,7 @@ export default function DealDetailPage() {
             )}
 
             <motion.div variants={withReducedMotion(rise, reduced)}>
-              <NegotiationPanel deal={deal} role={role} onUpdated={setDeal} />
+              <NegotiationPanel deal={deal} role={role} onUpdated={(d) => (d ? setDeal(d) : load())} />
             </motion.div>
 
             <motion.div variants={withReducedMotion(rise, reduced)}>
@@ -306,7 +315,7 @@ export default function DealDetailPage() {
                     <div key={i} className="border border-line rounded-xl2 p-3.5">
                       <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
                         <span className="text-xs text-muted tnum">
-                          {new Date(s.submittedAt).toLocaleString('en-IN')}
+                          {new Date(s.submittedAt).toLocaleString('en-IN', STAMP)}
                         </span>
                         <span className="flex items-center gap-1.5">
                           {s.late && <span className="pill-warn">Late</span>}
@@ -360,7 +369,7 @@ export default function DealDetailPage() {
                         </div>
                         {t.note && <div className="text-xs text-muted mt-0.5 leading-relaxed">{t.note}</div>}
                         <div className="text-xs text-muted tnum mt-0.5">
-                          {t.at ? new Date(t.at).toLocaleString('en-IN') : ''}
+                          {t.at ? new Date(t.at).toLocaleString('en-IN', STAMP) : ''}
                         </div>
                       </div>
                     </li>
