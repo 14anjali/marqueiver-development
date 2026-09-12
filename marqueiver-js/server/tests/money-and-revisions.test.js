@@ -111,9 +111,25 @@ test('exhausted revisions route to Resolution rather than being refused', () => 
     // Policy 5.5 — the brand still needs a way forward. A hard 4xx would leave
     // the deal stuck with no route out.
     const controller = read('modules/deals/deals.controller.js');
-    const handler = controller.slice(controller.indexOf('export const requestRevision'));
 
-    assert.match(handler.slice(0, 1200), /to: 'resolution'/);
+    /*
+      The routing moved into `moveToRevision`, shared by the deal-level endpoint
+      and the per-submission review, so the cap and the Policy 5.5 diversion
+      cannot be enforced on one path and skipped on the other. This asserts the
+      property that matters — every caller goes through the helper, and the
+      helper routes to Resolution — rather than the text of one handler.
+    */
+    const helper = controller.slice(
+        controller.indexOf('async function moveToRevision'),
+        controller.indexOf('export const reviewSubmissionSchema'),
+    );
+    assert.match(helper, /to: 'resolution'/);
+    assert.match(helper, /canRequestRevision\(deal\)/);
+
+    const handler = controller.slice(controller.indexOf('export const requestRevision'));
+    assert.match(handler.slice(0, 1600), /moveToRevision\(deal/);
+    assert.equal(/canRequestRevision/.test(handler.slice(0, 1600)), false,
+        'the cap must be checked in one place, not re-implemented per caller');
 });
 
 /* ─────────────── F-4 · production cannot boot on mock payments ────────────── */

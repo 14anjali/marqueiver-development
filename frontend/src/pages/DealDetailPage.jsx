@@ -13,6 +13,7 @@ import DealChat from '../components/deals/DealChat';
 import WorkspaceHeader from '../components/deals/WorkspaceHeader';
 import CollaborationFiles from '../components/deals/CollaborationFiles';
 import ActivityHistory from '../components/deals/ActivityHistory';
+import DeliverablesPanel from '../components/deals/DeliverablesPanel';
 import { MESSAGING_ALLOWED_STATES, MESSAGING_LOCK_REASON } from '../components/deals/messagingLock';
 import { Modal } from '../components/overlay';
 import { StatusPill, Money, Progress, SkeletonCard, SuccessMark } from '../components/feedback';
@@ -75,7 +76,10 @@ const ACTIONS = {
   brand: {
     invitation: [['declined', 'Decline']],
     negotiation: [['declined', 'Decline']],
-    submitted: [['completed', 'Approve and release payment']],
+    // Releasing the escrow, once every deliverable has been approved in the
+    // deliverables panel. It is not "approve and release": approving the work
+    // and paying for it are two decisions, and only one of them is reversible.
+    submitted: [['completed', 'Release payment']],
   },
   creator: {
     invitation: [['negotiation', 'Accept and negotiate'], ['declined', 'Decline']],
@@ -152,6 +156,29 @@ export default function DealDetailPage() {
   const [payments, setPayments] = useState([]);
   const [messages, setMessages] = useState(null);
 
+  /**
+   * The agreed deliverables and every submission against each.
+   *
+   * From the server, not derived here: what counts as "every deliverable
+   * approved" is the gate on releasing money, and the page must not be able to
+   * answer that question differently from the endpoint that enforces it.
+   */
+  const [deliverables, setDeliverables] = useState(null);
+  /** Which line the creator is submitting against, when they picked one. */
+  const [submitFor, setSubmitFor] = useState(null);
+
+  const loadDeliverables = async () => {
+    try {
+      const { data } = await api.listDeliverables(id);
+      setDeliverables(data);
+    } catch { setDeliverables(null); }
+  };
+
+  const openSubmit = (deliverable) => {
+    setSubmitFor(deliverable ?? null);
+    setShowSubmit(true);
+  };
+
   const loadPayments = async () => {
     try {
       const { data } = await api.paymentRecords(id);
@@ -176,6 +203,7 @@ export default function DealDetailPage() {
       setDeal(data);
       loadTerms();
       loadPayments();
+      loadDeliverables();
       api.getNegotiation(id)
         .then((n) => setNegotiationOffers(n.data?.offers ?? []))
         .catch(() => setNegotiationOffers([]));
@@ -197,7 +225,7 @@ export default function DealDetailPage() {
 
   async function doTransition(to, label) {
     // Submitting work opens the dialog rather than posting a placeholder.
-    if (to === 'submitted' && role === 'creator') { setShowSubmit(true); return; }
+    if (to === 'submitted' && role === 'creator') { openSubmit(null); return; }
 
     setBusy(to);
     try {
@@ -257,7 +285,16 @@ export default function DealDetailPage() {
     );
   }
 
-  const actions = ACTIONS[role]?.[deal.state] || [];
+  /**
+   * The brand cannot release payment on work it has not approved.
+   *
+   * The server refuses it too — that is the enforcement. Hiding the button as
+   * well means the brand is told what to do first (review the deliverables)
+   * rather than pressing a button and reading a refusal.
+   */
+  const allApproved = deliverables?.allApproved ?? false;
+  const actions = (ACTIONS[role]?.[deal.state] || [])
+    .filter(([to]) => !(to === 'completed' && role === 'brand' && !allApproved));
   const escrowFunded = Boolean(deal.escrow?.funded);
   const released = Boolean(deal.escrow?.releasedAt);
 
@@ -328,7 +365,11 @@ export default function DealDetailPage() {
           <div className="space-y-4 min-w-0">
             {/* ── who, what, where it is, whose move ─────────────────── */}
             <motion.section variants={withReducedMotion(rise, reduced)}>
-              <WorkspaceHeader deal={deal} role={role} payments={payments} binding={terms?.bindingTerms} />
+              <WorkspaceHeader
+                deal={deal} role={role} payments={payments}
+                binding={terms?.bindingTerms}
+                deliverablesApproved={allApproved}
+              />
             </motion.section>
 
             {/* Revisions, where the parties can see them rather than
@@ -370,11 +411,10 @@ export default function DealDetailPage() {
                     );
                   })}
                 </div>
-                {deal.state === 'submitted' && role === 'brand' && (
+                {deal.state === 'submitted' && role === 'brand' && allApproved && (
                   <p className="text-xs text-muted mt-3 leading-relaxed">
-                    Approving releases the escrow to the creator. If it is not
-                    right, request a revision instead — you have{' '}
-                    {Math.max(0, revisionsAllowed - revisionsUsed)} left.
+                    This releases the escrow to the creator and closes the
+                    collaboration. It cannot be undone.
                   </p>
                 )}
               </motion.section>
@@ -421,47 +461,21 @@ export default function DealDetailPage() {
               />
             </motion.div>
 
-            {/* ── deliverables ───────────────────────────────────────── */}
-            {deal.workSubmissions?.length > 0 && (
-              <motion.section variants={withReducedMotion(rise, reduced)} className="card p-5">
-                <h2 className="font-display font-bold text-ink text-sm mb-3">Deliverables</h2>
-                <div className="space-y-3">
-                  {deal.workSubmissions.map((s, i) => (
-                    <div key={i} className="border border-line rounded-xl2 p-3.5">
-                      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-                        <span className="text-xs text-muted tnum">
-                          {new Date(s.submittedAt).toLocaleString('en-IN', STAMP)}
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          {s.late && <span className="pill-warn">Late</span>}
-                          <StatusPill status={
-                            s.reviewStatus === 'approved' ? 'completed'
-                              : s.reviewStatus === 'rejected' ? 'revision'
-                                : 'submitted'
-                          } />
-                        </span>
-                      </div>
-                      <ul className="space-y-1">
-                        {(s.urls || []).map((u) => (
-                          <li key={u}>
-                            <a
-                              href={u} target="_blank" rel="noopener noreferrer"
-                              className="text-sm text-brand-600 hover:text-brand-700 underline break-all focusable"
-                            >
-                              {u}
-                            </a>
-                          </li>
-                        ))}
-                      </ul>
-                      {s.note && <p className="text-sm text-muted mt-2 leading-relaxed">{s.note}</p>}
-                      {s.reviewNote && (
-                        <p className="text-sm text-ink bg-bg rounded-lg p-2.5 mt-2 leading-relaxed">
-                          <span className="font-medium">Brand’s note: </span>{s.reviewNote}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
+            {/*
+              The agreed brief's own lines, each with its submission history and
+              the brand's decision. It listed submissions, which answers "what
+              has been sent" and never "what is still owed".
+            */}
+            {['in_progress', 'submitted', 'revision', 'resolution', 'disputed', 'completed']
+              .includes(deal.state) && (
+              <motion.section variants={withReducedMotion(rise, reduced)}>
+                <DeliverablesPanel
+                  deal={deal}
+                  role={role}
+                  progress={deliverables}
+                  onReviewed={load}
+                  onSubmit={role === 'creator' ? openSubmit : undefined}
+                />
               </motion.section>
             )}
 
@@ -644,9 +658,14 @@ export default function DealDetailPage() {
       {showSubmit && (
         <SubmitWorkDialog
           deal={deal}
+          /*
+            The list the creator chooses from, and the line they arrived with if
+            they pressed "Submit this" on a specific one.
+          */
+          deliverables={submitFor ? [submitFor] : (deliverables?.deliverables ?? [])}
           isResubmission={deal.state === 'revision'}
-          onClose={() => setShowSubmit(false)}
-          onDone={() => { setShowSubmit(false); load(); }}
+          onClose={() => { setShowSubmit(false); setSubmitFor(null); }}
+          onDone={() => { setShowSubmit(false); setSubmitFor(null); load(); }}
         />
       )}
     </AppShell>

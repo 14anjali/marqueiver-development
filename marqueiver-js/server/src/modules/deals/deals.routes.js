@@ -27,6 +27,11 @@ router.get('/:id/cancellation-preview', c.previewCancellation);
 router.post('/:id/cancel', validate(c.cancelDealSchema), c.cancelDeal);
 // Policy 5.4 — revision requests, capped at the agreed rounds.
 router.post('/:id/request-revision', requireRole('brand'), c.requestRevision);
+// The agreed deliverables and everything submitted against each — both parties.
+router.get('/:id/deliverables', c.listDeliverables);
+// The brand's decision on one submission. Nothing else writes `approved`.
+router.post('/:id/submissions/:submissionId/review', requireRole('brand'),
+    validate(c.reviewSubmissionSchema), c.reviewSubmission);
 
 /* Policy 5.5 option B — a fourth revision is paid scope, not free work.
  * Propose (brand) → respond (creator) → pay (brand) → rounds exist. */

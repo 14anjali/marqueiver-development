@@ -411,6 +411,16 @@ export const api = {
   messageUploadUrl: (fileName, contentType) =>
     req('/api/users/me/logo-upload-url', { method: 'POST', body: { fileName, contentType, purpose: 'message' } }),
 
+  /** Deliverable files, through the same signed-upload endpoint everything else uses. */
+  deliverableUploadUrl: (fileName, contentType) =>
+    req('/api/users/me/logo-upload-url', { method: 'POST', body: { fileName, contentType, purpose: 'deliverable' } }),
+
+  /** The agreed deliverables and everything submitted against each. */
+  listDeliverables: (dealId) => req(`/api/deals/${dealId}/deliverables`),
+  /** The brand's decision on one submission. Nothing else writes an approval. */
+  reviewSubmission: (dealId, submissionId, body) =>
+    req(`/api/deals/${dealId}/submissions/${submissionId}/review`, { method: 'POST', body }),
+
   /** Every payment attempt on a collaboration, with its state history. */
   paymentRecords: (dealId) => req(`/api/deals/${dealId}/payments`),
   markPaymentInitiated: (dealId) => req(`/api/deals/${dealId}/payment-initiated`, { method: 'POST' }),

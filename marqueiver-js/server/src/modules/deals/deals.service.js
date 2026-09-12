@@ -1,654 +1,1023 @@
-import mongoose, { Types } from 'mongoose';
-import { Deal, Transaction, Wallet, Payout, CommissionRecord } from '../../models/index.js';
-import { isVerified } from '../../models/Transaction.js';
-import { transactionsSupported } from '../../config/db.js';
-import { canTransition, isTerminal } from './dealStateMachine.js';
+import { z } from 'zod';
+import { Types } from 'mongoose';
+import { catchAsync, ApiError } from '../../utils/apiError.js';
+import { ok, created } from '../../utils/respond.js';
+import { Deal, User, CreatorProfile, BrandProfile, Campaign, Offer } from '../../models/index.js';
+import { INCLUDED_REVISIONS } from '../../models/Deal.js';
 import {
-    computePartialRelease, currentCommissionPct,
-    brandCancellationOutcome, creatorCancellationOutcome,
-} from '../../services/commission.service.js';
-import { ApiError } from '../../utils/apiError.js';
-import * as cashfree from '../../services/cashfree.service.js';
+    transitionDeal, listDealsForUser, createPaymentSession,
+    markPaymentInitiated, paymentRecords,
+} from './deals.service.js';
+import { canRequestRevision, canCancel, REVIEW_WINDOW_DAYS, RESOLUTION_AUTO_DAYS } from './dealStateMachine.js';
+import { brandCancellationOutcome, creatorCancellationOutcome } from '../../services/commission.service.js';
+import * as additionalTerms from './additionalTerms.service.js';
+import { postOffer, acceptOffer, rejectOffer, rejectDeal, confirmTerms, threadForDeal } from './negotiation.service.js';
+import {
+    proposeChange as changeRequest_propose,
+    respondToChange as changeRequest_respond,
+    withdrawChange as changeRequest_withdraw,
+    changeHistory as changeRequest_history,
+} from './changeRequest.service.js';
+import {
+    agreedDeliverables, deliverableProgress, toSubmissionFile,
+    allDeliverablesApproved, outstandingDeliverables,
+} from './deliverables.service.js';
 import { notify, dealPayload } from '../notifications/notifications.service.js';
-import { templates } from '../notifications/notification.templates.js';
-
+import { DEAL_STATES } from '../../../../shared/types.js';
 /**
- * Execute a deal state transition. Every money-moving state change runs
- * inside a MongoDB multi-document transaction across `deals` + `transactions`
- * (+ `wallets` on release), so a partial failure never leaves an inconsistent
- * balance. When the connected server is standalone (dev), we fall back to
- * sequential writes with a warning.
+ * Route 2's entry point: a brand found a creator in discovery and is sending
+ * them a requirement.
  *
- * Money model (Wallet + escrow, backend-owned — see IMPLEMENTATION_CHANGELOG.md
- * "Wallet & Cashfree" for the full design):
- *  - confirm_escrow_funded → set ONLY by the verified Cashfree success webhook.
- *                     merchant account; the deal just records that it's held.
- *  - release_escrow → INTERNAL ONLY. No Cashfree call. Credits the creator's
- *                     Wallet.balance. The creator later withdraws from their
- *                     wallet via modules/wallet, which is the only other point
- *                     real money moves (Cashfree Payouts).
- *  - admin_escrow_decision → Admin settles a funded deal: full refund, full
- *                     payout, or a validated custom split (§8).
- */
-export async function transitionDeal(params) {
-    const { dealId, to, actor, actorId, note } = params;
-    const deal = await Deal.findById(dealId);
-    if (!deal)
-        throw ApiError.notFound('Deal not found');
-    if (isTerminal(deal.state))
-        throw ApiError.conflict(`Deal is ${deal.state} (terminal)`);
-    if (actor !== 'admin' && actor !== 'system') {
-        const partyId = actor === 'creator' ? deal.creator : deal.brand;
-        if (partyId.toString() !== actorId)
-            throw ApiError.forbidden('Not a party to this deal');
-    }
-    const check = canTransition(deal.state, to, actor);
-    if (!check.allowed)
-        throw ApiError.unprocessable(check.reason ?? 'Illegal transition');
-    const effect = check.rule?.effect;
-    const from = deal.state;
-    if (!effect || effect === 'open_dispute' || effect === 'resolve_dispute') {
-        applyStateFields(deal, { to, actor, actorId, note, disputeReason: params.disputeReason });
-        await deal.save();
-        await afterTransition(deal, from, to);
-        return deal;
-    }
-    return runMoneyTransition(deal, { ...params, effect });
-}
-
-/**
- * Policy 5.3 / 5.5 — automatic completion and automatic option C run with NO
- * human actor. `new Types.ObjectId(null)` throws, so every system-driven
- * transition would have crashed. Actor id is optional from here on.
- */
-const actorRef = (id) => (id ? new Types.ObjectId(id) : undefined);
-
-function applyStateFields(deal, p) {
-    const from = deal.state;
-    deal.state = p.to;
-    deal.timeline.push({
-        from,
-        to: p.to,
-        by: actorRef(p.actorId),
-        byRole: p.actor,
-        note: p.note,
-        at: new Date(),
-    });
-    // Policy 7.2 — declining a brief is not a cancellation, so both are
-    // recorded, separately, with the reason visible to both parties.
-    if (p.to === 'declined' || p.to === 'cancelled') {
-        deal.closure = {
-            reason: p.note ?? (p.to === 'declined' ? 'Declined' : 'Cancelled'),
-            by: actorRef(p.actorId),
-            byRole: p.actor,
-            at: new Date(),
-        };
-    }
-    if (from === 'revision' || (from === 'submitted' && p.to === 'revision')) {
-        if (p.to === 'revision')
-            deal.revisionCount += 1;
-    }
-}
-
-
-const round2 = (n) => Math.round(n * 100) / 100;
-
-/**
- * The single place money leaves escrow — Policy 6.2, 6.3, 9, 14, 24.
+ * ── One collaboration workflow, two ways in ────────────────────────────────
  *
- * Every route to a release (Brand approval, automatic completion, resolution
- * outcome, dispute determination, cancellation settlement) goes through here,
- * so the commission deduction, the CommissionRecord and the Payout record can
- * never be skipped by adding a new caller.
+ * This deliberately creates the same Deal, in the same opening state, running
+ * the same state machine as an application does. The only differences are the
+ * two fields that record how it started:
  *
- * Ordering matters: the wallet credit and the Payout record are written before
- * the state change is saved by the caller, inside the same session. Policy 9
- * requires that a Collaboration must not become `completed` unless the credit
- * was actually recorded.
+ *   Route 1  creator applies   →  origin 'application', requestedBy 'creator'
+ *   Route 2  brand invites     →  origin 'invite',      requestedBy 'brand'
+ *
+ * Everything after that — negotiation, escrow, submission, revisions,
+ * resolution, release — is shared. `requestedBy` is what makes the handshake
+ * symmetric: `openThread` requires the *receiving* party to accept, so a brand
+ * cannot invite a creator and then negotiate with itself, exactly as a creator
+ * cannot apply and open negotiation without the brand selecting them.
+ *
+ * ── What a requirement now carries ─────────────────────────────────────────
+ *
+ * It used to carry almost nothing. The profile page sent a generated title, the
+ * creator's cheapest rate-card line as the amount and the literal string "To be
+ * agreed during negotiation" as the deliverables, so every direct invitation
+ * arrived identical and said nothing about the work. A creator cannot accept or
+ * decline a brief they cannot read, which is what the brief fields below are
+ * for — and usage rights are part of scope under Policy 8, so they belong in
+ * the requirement rather than being discovered after acceptance.
  */
-async function settleRelease(deal, { creatorShare, brandRefund, reason, session }) {
-    const total = deal.escrow.amount ?? 0;
-    const gross = round2(creatorShare);
-    const refund = round2(brandRefund);
+export const createDealSchema = z.object({
+    creatorId: z.string(),
+    title: z.string().min(3).max(140),
+    contentTypes: z.array(z.string().max(40)).max(10).default([]),
+    amount: z.number().min(0),
+    /**
+     * The brief itself. Required and non-trivial: this is the thing the creator
+     * is being asked to say yes or no to.
+     */
+    deliverables: z.string().min(20).max(4000),
+    deadline: z.string().optional(),
+    revisionsAllowed: z.number().min(0).max(10).default(INCLUDED_REVISIONS),
+    /** A note to the creator, alongside the brief. */
+    message: z.string().max(1000).optional(),
+    /** Optional: the campaign this requirement belongs to, for the brand's own records. */
+    campaignId: z.string().optional(),
+    /** Policy 8 — scope, agreed up front rather than assumed afterwards. */
+    usageRights: z.object({
+        licenceType: z.enum(['default', 'extended', 'full_assignment']).optional(),
+        durationMonths: z.number().int().min(1).max(120).optional(),
+        paidAdvertising: z.boolean().optional(),
+        whitelisting: z.boolean().optional(),
+        modificationAllowed: z.boolean().optional(),
+        notes: z.string().max(1000).optional(),
+    }).optional(),
+    exclusivity: z.string().max(500).optional(),
+}).strict();
 
-    if (Math.round((gross + refund) * 100) !== Math.round(total * 100))
-        throw ApiError.unprocessable(
-            `Settlement must account for the full escrowed ₹${total}. Got ₹${gross} + ₹${refund}.`,
-        );
+/** States in which an invitation is still live, so a second one would be noise. */
+const OPEN_DEAL_STATES = DEAL_STATES.filter(
+    (s) => !['declined', 'cancelled', 'completed'].includes(s),
+);
 
-    // Policy 14.7/14.8 — the snapshotted rate governs, not the live one.
-    const ratePct = deal.commission?.ratePct ?? currentCommissionPct();
-    const money = computePartialRelease({
-        agreedValue: total,
-        commissionPct: ratePct,
-        creatorShare: gross,
-    });
-
-    if (gross > 0) {
-        await Wallet.findOneAndUpdate(
-            { user: deal.creator },
-            { $inc: { balance: money.creatorNet, lifetimeCredited: money.creatorNet } },
-            { upsert: true, session: session ?? undefined },
-        );
-
-        await Transaction.create([{
-            deal: deal._id,
-            toUser: deal.creator,
-            type: 'escrow_release',
-            status: 'success',
-            amount: money.creatorNet,
-            gateway: 'mock', // internal wallet credit; real money moves on withdrawal
-            idempotencyKey: `release_${deal.id}_${reason}`,
-        }], session ? { session } : {});
-
-        // Policy 24 — immutable money records.
-        const [commissionRecord] = await CommissionRecord.create([{
-            deal: deal._id,
-            creator: deal.creator,
-            brand: deal.brand,
-            agreedValue: total,
-            ratePct,
-            amount: money.commission,
-            chargedOn: gross,
-            releaseReason: reason,
-        }], session ? { session } : {});
-
-        await Payout.create([{
-            deal: deal._id,
-            creator: deal.creator,
-            grossAmount: gross,
-            commission: money.commission,
-            commissionRecord: commissionRecord._id,
-            // PENDING CA CONFIRMATION (Policy 6.8) — no deduction assumed.
-            tdsAmount: 0,
-            netAmount: money.creatorNet,
-            status: 'pending',
-            payoutMethod: 'upi',
-        }], session ? { session } : {});
-    }
-
-    if (refund > 0) {
-        const fundingTxn = await Transaction.findById(deal.escrow.transactionRef)
-            .session(session ?? undefined);
-        await cashfree.refundToBrand(fundingTxn?.gatewayRef ?? '', refund);
-        await Transaction.create([{
-            deal: deal._id,
-            toUser: deal.brand,
-            type: 'refund',
-            status: 'success',
-            amount: refund,
-            gateway: 'cashfree',
-            idempotencyKey: `refund_${deal.id}_${reason}`,
-        }], session ? { session } : {});
-    }
-
-    deal.commission = {
-        ...(deal.commission ?? {}),
-        ratePct,
-        amount: money.commission,
-        creatorNet: money.creatorNet,
-        statutoryDeduction: 0,
-    };
-    deal.escrow.settlement = { creatorPayout: money.creatorNet, brandRefund: refund, at: new Date() };
-    deal.escrow.releasedAt = new Date();
-}
-
-async function runMoneyTransition(deal, params) {
-    const { to, actor, actorId, effect } = params;
-    const from = deal.state;
-    const session = transactionsSupported ? await mongoose.startSession() : null;
-    const run = async () => {
-        /**
-         * §6 — reached ONLY from the verified Cashfree success webhook, via
-         * `confirmEscrowFunded()` below. The previous `fund_escrow` effect was
-         * triggered by a client call that asserted its own payment success and
-         * wrote `status: 'success'` on the transaction without the processor
-         * ever confirming it. That path is gone.
-         */
-        if (effect === 'confirm_escrow_funded') {
-            const txn = await Transaction.findOne({ idempotencyKey: `fund_${deal.id}` })
-                .session(session ?? undefined);
-            if (!txn)
-                throw ApiError.unprocessable('No funding transaction for this deal');
-            /*
-              `isVerified` rather than `=== 'success'`: the state is now
-              `verified`, and `success` is the legacy spelling of the same fact.
-              A comparison that knows only one of them reports a paid
-              collaboration as unpaid.
-            */
-            if (!isVerified(txn))
-                throw ApiError.unprocessable('Funding transaction is not confirmed by the gateway');
-
-            /**
-             * ── The advance is a tranche, not the whole escrow ──────────────
-             *
-             * This wrote `deal.escrow.amount = txn.amount`. Once the advance
-             * became half the value, that would have overwritten the agreed
-             * total with half of it — and `release_escrow` pays out
-             * `deal.escrow.amount`, so the creator would have been paid the
-             * advance and the rest would have vanished from the record.
-             *
-             * The total is set at acceptance from the frozen schedule and is
-             * not touched here. What this records is that the advance tranche
-             * arrived.
-             */
-            deal.escrow.schedule = deal.escrow.schedule ?? {};
-            deal.escrow.schedule.advance = {
-                ...(deal.escrow.schedule.advance?.toObject?.() ?? deal.escrow.schedule.advance ?? {}),
-                funded: true,
-                fundedAt: new Date(),
-                transactionRef: txn._id,
-            };
-
-            /*
-              `escrow.funded` means "the collaboration is funded enough to
-              start", which under the 50/50 schedule is the advance. The balance
-              is a separate tranche and is not part of this gate.
-            */
-            deal.escrow.funded = true;
-            deal.escrow.fundedAt = new Date();
-            deal.escrow.transactionRef = txn._id;
-
-            // A previous failure is resolved by a payment that went through.
-            deal.escrow.lastFailure = undefined;
-            deal.escrow.needsAdminReview = false;
-        }
-
-        /**
-         * Policy 6.3 / 14 — release deducts the platform commission before the
-         * Creator is credited. The previous implementation credited the FULL
-         * escrow amount, which paid creators 100% and collected no commission
-         * at all.
-         *
-         * Policy 14.7/14.8 — the rate used is the one snapshotted onto the deal
-         * at Acceptance, never the live rate. `settleRelease` reads the
-         * snapshot; a deal accepted under a promotional rate keeps it.
-         *
-         * Policy 9 (impact report) — the Collaboration must not reach
-         * `completed` until the Creator's wallet credit is recorded. The credit
-         * and the state change share one transaction below, so a failure rolls
-         * both back.
-         */
-        if (effect === 'release_escrow') {
-            if (!deal.escrow.funded)
-                throw ApiError.unprocessable('Escrow was never funded');
-
-            /**
-             * ── Release cannot pay out money that was never collected ───────
-             *
-             * `creatorShare: deal.escrow.amount` is the full collaboration
-             * value, and under the 50/50 schedule only the advance has been
-             * charged. Releasing the full value against a half-funded escrow
-             * would credit the creator's wallet with money the platform never
-             * received.
-             *
-             * Charging the balance is deliberately not built yet, so this
-             * refuses rather than guessing. It refuses ONLY for deals that
-             * actually have a schedule with an unfunded balance — deals agreed
-             * before the split, whose single payment was the whole value, are
-             * unaffected and complete exactly as before.
-             *
-             * This is the guard, not the feature: the balance charge is the
-             * next piece of work, and until it exists a 50/50 collaboration
-             * stops here rather than paying out of thin air.
-             */
-            const sched = deal.escrow.schedule;
-            const balanceOwed = sched?.balance?.amount > 0 && !sched.balance.funded;
-            if (balanceOwed) {
-                throw ApiError.unprocessable(
-                    'The remaining 50% has not been paid into escrow, so it cannot be released. '
-                    + 'Collecting the balance payment is not available yet.',
-                );
-            }
-
-            await settleRelease(deal, {
-                creatorShare: deal.escrow.amount,
-                brandRefund: 0,
-                reason: params.releaseReason ?? 'brand_approval',
-                session,
-            });
-        }
-
-        /**
-         * Policy 7.1 / 7.2 — cancellation outcomes are DETERMINISTIC by stage.
-         * There is no Admin discretion here: the policy states the split, so
-         * the system computes it. The old `admin_escrow_decision` effect, which
-         * let an Admin choose any split on a normal cancellation, is gone.
-         */
-        if (effect === 'cancel_settlement') {
-            if (deal.escrow.funded && !deal.escrow.releasedAt) {
-                const outcome = actor === 'creator'
-                    ? creatorCancellationOutcome({
-                        state: from,
-                        agreedValue: deal.escrow.amount,
-                        commissionPct: deal.commission?.ratePct,
-                        acceptedPartialValue: params.acceptedPartialValue,
-                    })
-                    : brandCancellationOutcome({
-                        state: from,
-                        agreedValue: deal.escrow.amount,
-                        commissionPct: deal.commission?.ratePct,
-                    });
-
-                await settleRelease(deal, {
-                    creatorShare: outcome.creatorGross,
-                    brandRefund: outcome.brandRefund,
-                    reason: 'cancellation',
-                    session,
-                });
-            }
-            deal.cancellation = {
-                stage: from,
-                byRole: actor,
-                by: actorRef(actorId),
-                reason: params.note,
-                at: new Date(),
-            };
-        }
-
-        /**
-         * Policy 5.5 — Resolution outcomes. Option A is a reduced fee agreed by
-         * the parties; option C is the 50/50 release-without-use, which applies
-         * automatically after 7 days. The caller supplies `creatorShare`; the
-         * split is validated against the escrowed total before money moves.
-         */
-        if (effect === 'resolution_settlement') {
-            if (!deal.escrow.funded)
-                throw ApiError.unprocessable('Escrow was never funded');
-
-            const total = deal.escrow.amount ?? 0;
-            const creatorShare = Number(
-                params.creatorShare ?? (deal.resolutionOption === 'C' ? total / 2 : total),
-            );
-            const brandRefund = round2(total - creatorShare);
-            if (creatorShare < 0 || brandRefund < 0)
-                throw ApiError.unprocessable('Resolution amounts cannot be negative');
-
-            await settleRelease(deal, {
-                creatorShare, brandRefund, reason: 'resolution', session,
-            });
-        }
-
-        /**
-         * Policy 10.4 — a dispute determination is where Marqueiver DOES
-         * exercise discretion, including a partial release. The total must
-         * still account for the whole escrowed amount.
-         */
-        if (effect === 'dispute_determination') {
-            const total = deal.escrow.amount ?? 0;
-            if (deal.escrow.funded && !deal.escrow.releasedAt) {
-                const creatorShare = Number(params.creatorPayout ?? 0);
-                const brandRefund = Number(params.brandRefund ?? total - creatorShare);
-
-                if (creatorShare < 0 || brandRefund < 0)
-                    throw ApiError.unprocessable('Determination amounts cannot be negative');
-                if (Math.round((creatorShare + brandRefund) * 100) !== Math.round(total * 100))
-                    throw ApiError.unprocessable(
-                        `Creator payout + brand refund must equal the escrowed ₹${total}. Got ₹${creatorShare} + ₹${brandRefund}.`,
-                    );
-
-                await settleRelease(deal, {
-                    creatorShare, brandRefund, reason: 'dispute_determination', session,
-                });
-            }
-        }
-
-        applyStateFields(deal, { to, actor, actorId, note: params.note });
-        if (deal.dispute && (to === 'completed' || to === 'cancelled')) {
-            deal.dispute.resolvedBy = actorRef(actorId);
-            deal.dispute.resolvedAt = new Date();
-            deal.dispute.resolution = params.note;
-        }
-        await deal.save(session ? { session } : {});
-    };
-    try {
-        if (session)
-            await session.withTransaction(run);
-        else
-            await run(); // standalone fallback (dev only)
-    }
-    finally {
-        await session?.endSession();
-    }
-    await afterTransition(deal, from, to);
-    return deal;
-}
-
-async function afterTransition(deal, from, to) {
-    const recipient = to === 'completed' || to === 'in_progress' ? deal.creator : deal.brand;
-    const isMoneyEvent = to === 'in_progress' || to === 'completed';
-    const msg = to === 'in_progress'
-        ? templates.escrowFunded(deal.title, deal.escrow?.amount ?? deal.terms?.amount)
-        : to === 'completed'
-            ? templates.escrowReleased(deal.title, deal.escrow?.amount ?? deal.terms?.amount)
-            : templates.dealStateChanged(deal.title, to);
-    await notify({
-        user: recipient.toString(),
-        type: `deal.${to}`,
-        title: msg.title,
-        body: msg.body,
-        data: dealPayload(deal),
-        channels: isMoneyEvent ? ['in_app', 'email', 'whatsapp'] : ['in_app'],
-    }).catch(() => void 0);
-}
-
-/**
- * Create a real Cashfree Checkout session for a deal (feature: Frontend
- * Cashfree Checkout). Separate from the `fund_escrow` transition effect
- * above — this only creates the order + a 'pending' Transaction row and
- * returns the `paymentSessionId` for the Cashfree JS SDK to render an actual
- * payment form. The deal itself is NOT marked funded here; that still only
- * happens on the verified Cashfree success webhook (§6), which calls
- * `confirmEscrowFunded()`. The frontend cannot activate a deal.
- */
-export async function createPaymentSession(dealId, actorId) {
-    const deal = await Deal.findById(dealId);
-    if (!deal) throw ApiError.notFound('Deal not found');
-    if (deal.brand.toString() !== actorId) throw ApiError.forbidden('Not a party to this deal');
-    if (deal.state !== 'accepted' && deal.state !== 'escrow_pending')
-        throw ApiError.unprocessable('Both parties must confirm terms before escrow can be funded');
+export const createDeal = catchAsync(async (req, res) => {
+    if (req.auth.role !== 'brand')
+        throw ApiError.forbidden('Only brands can invite');
+    const b = req.body;
 
     /**
-     * ── What is actually charged ───────────────────────────────────────────
-     *
-     * The advance, not the whole collaboration value. This used to raise an
-     * order for `deal.terms.amount` while the confirmed requirement — quoted in
-     * `modules/messaging/messaging.policy.js`, and the thing the chat gate is
-     * built on — says "the required 50% escrow payment". The policy documents
-     * and the payment path disagreed, and the payment path was what ran.
-     *
-     * The figure is read from the schedule frozen at acceptance rather than
-     * recomputed, for the same reason the commission rate is snapshotted
-     * (Policy 14.7/14.8): what both parties saw when they agreed is what
-     * applies. The fallback to the full amount covers deals that were agreed
-     * before the schedule existed — for them the full value *was* the advance.
+     * The creator was never validated. `creatorId` went straight into the Deal,
+     * so an id belonging to a brand, an admin, a deleted account or nothing at
+     * all created a real collaboration pointing at it — and the resulting deal
+     * could reach escrow with no creator able to act on it.
      */
-    const advance = deal.escrow?.schedule?.advance?.amount;
-    const amount = advance > 0 ? advance : deal.terms.amount;
+    const creator = await User.findById(b.creatorId).select('role status').lean()
+        .catch(() => null);
+    if (!creator || creator.role !== 'creator')
+        throw ApiError.notFound('Creator not found');
 
-    if (deal.escrow?.schedule?.advance?.funded)
-        throw ApiError.unprocessable('The advance for this collaboration is already paid');
-
-    const idempotencyKey = `fund_${deal.id}`;
     /*
-      A still-open session from a moment ago (e.g. a page refresh) can be handed
-      back as-is — its paymentSessionId is cached in `meta` so no extra Cashfree
-      call is needed. `initiated` counts as still-open: the brand opened
-      checkout and came back, and raising a second order would leave two live
-      ones against the same collaboration.
-
-      A `failed` row is never reused and never deleted — it is the record of the
-      attempt, and the retry path below supersedes it with a fresh order.
+      Policy 3.3 — an unpublished creator has withdrawn from discovery. Existing
+      collaborations continue, but they are not open to new approaches.
     */
-    const existing = await Transaction.findOne({
-        idempotencyKey,
-        status: { $in: ['pending', 'initiated'] },
-    });
-    if (existing && existing.meta?.paymentSessionId
-        && existing.amount === amount
-        && Date.now() - existing.createdAt.getTime() < 15 * 60 * 1000) {
-        return {
-            paymentSessionId: existing.meta.paymentSessionId,
-            orderRef: existing.gatewayRef,
-            gateway: existing.gateway,
-            amount: existing.amount,
-            status: existing.status,
-        };
-    }
-    if (existing) await Transaction.deleteOne({ _id: existing._id });
+    const profile = await CreatorProfile.findOne({ user: b.creatorId })
+        .select('isPublished displayName').lean();
+    if (!profile)
+        throw ApiError.notFound('Creator not found');
+    if (profile.isPublished === false)
+        throw ApiError.unprocessable('This creator is not currently accepting new requests');
 
     /**
-     * The idempotency key carries an attempt number, so a retry after a failure
-     * gets its own order rather than colliding with the failed one. Without it
-     * Cashfree would see a duplicate order id and the brand could never pay.
+     * One live approach at a time. Without this, the confirm button double-firing
+     * — or a brand returning to the profile a week later having forgotten —
+     * produces two collaborations for one piece of work, and the creator has to
+     * guess which one to accept. A finished or declined one does not block a
+     * fresh approach: brands and creators do work together again.
      */
-    const attempt = await Transaction.countDocuments({ deal: deal._id, type: 'escrow_fund', tranche: 'advance' });
-    const orderKey = attempt > 0 ? `${deal.id}_a${attempt + 1}` : deal.id;
+    const existing = await Deal.findOne({
+        brand: req.auth.sub,
+        creator: b.creatorId,
+        state: { $in: OPEN_DEAL_STATES },
+    }).select('_id state title').lean();
+    if (existing) {
+        throw ApiError.conflict(
+            `You already have a collaboration open with ${profile.displayName || 'this creator'}. `
+            + 'Continue it rather than starting a second one.',
+            { dealId: String(existing._id), state: existing.state },
+        );
+    }
 
-    const order = await cashfree.createEscrowOrder(orderKey, amount);
-    const txn = new Transaction({
-        deal: deal._id,
-        fromUser: deal.brand,
-        type: 'escrow_fund',
-        tranche: 'advance',
-        amount,
-        gateway: order.gateway,
-        gatewayRef: order.orderRef,
-        idempotencyKey,
-        meta: { paymentSessionId: order.paymentSessionId, attempt: attempt + 1 },
+    const deal = await Deal.create({
+        brand: req.auth.sub,
+        creator: b.creatorId,
+        origin: 'invite',
+        requestedBy: 'brand',
+        campaign: b.campaignId || undefined,
+        title: b.title,
+        contentTypes: b.contentTypes,
+        terms: {
+            amount: b.amount,
+            deliverables: b.deliverables,
+            deadline: b.deadline ? new Date(b.deadline) : undefined,
+            revisionsAllowed: b.revisionsAllowed,
+        },
+        ...(b.usageRights ? { usageRights: b.usageRights } : {}),
+        ...(b.exclusivity ? { exclusivity: b.exclusivity } : {}),
+        state: 'invitation',
+        // Cleared rules §3 — an invitation is NOT the first negotiation offer.
+        // Offers can only be posted once the receiving party accepts and the
+        // deal reaches `negotiating`.
+        offers: [],
+        timeline: [{
+            from: null, to: 'invitation', by: new Types.ObjectId(req.auth.sub),
+            byRole: 'brand', at: new Date(),
+            ...(b.message ? { note: b.message } : {}),
+        }],
     });
-    txn.moveTo('pending', { by: 'brand', note: attempt > 0 ? `Retry ${attempt + 1}` : 'Advance payment created' });
-    await txn.save();
-
-    return {
-        paymentSessionId: order.paymentSessionId,
-        orderRef: order.orderRef,
-        gateway: order.gateway,
-        amount,
-        status: 'pending',
-    };
-}
-
+    await notify({
+        user: b.creatorId, type: 'deal.invited', title: 'New collaboration request',
+        body: `You've been asked to work on "${b.title}".`, data: dealPayload(deal),
+    }).catch(() => void 0);
+    created(res, deal);
+});
+export const listMyDeals = catchAsync(async (req, res) => {
+    const role = req.auth.role;
+    if (role !== 'creator' && role !== 'brand')
+        throw ApiError.forbidden();
+    const state = req.query.state;
+    const deals = await listDealsForUser(req.auth.sub, role, state);
+    ok(res, deals);
+});
 /**
- * The brand has opened checkout.
+ * Who the parties are, as the other side may see them.
  *
- * Reported by the client, and therefore trusted for nothing: it moves the row
- * from `pending` to `initiated` so both parties can see a payment is under way,
- * and that is all it does. Only the signature-verified webhook writes
- * `verified`, and only `verified` unlocks anything.
- */
-export async function markPaymentInitiated(dealId, actorId) {
-    const deal = await Deal.findById(dealId).select('brand').lean();
-    if (!deal) throw ApiError.notFound('Deal not found');
-    if (deal.brand.toString() !== actorId) throw ApiError.forbidden('Not a party to this deal');
-
-    const txn = await Transaction.findOne({ idempotencyKey: `fund_${dealId}`, status: 'pending' });
-    if (!txn) return null;
-
-    txn.moveTo('initiated', { by: 'brand', note: 'Checkout opened' });
-    await txn.save();
-    return txn;
-}
-
-/** The payment record for a collaboration: every attempt, with its history. */
-export async function paymentRecords(dealId) {
-    return Transaction.find({ deal: dealId }).sort({ createdAt: 1 }).lean();
-}
-
-/** List deals for a user with a single batched query (proposal §4.1 — no fan-out). */
-export async function listDealsForUser(userId, role, state) {
-    const filter = { [role]: new Types.ObjectId(userId) };
-    if (state)
-        filter.state = state;
-    return Deal.find(filter).sort({ updatedAt: -1 }).lean();
-}
-
-
-/**
- * Called by the Cashfree webhook once a payment is confirmed (§6).
+ * Allow-lists, not subtractions — the same discipline as the applicant review
+ * queue. A field added to either profile tomorrow does not reach the counterpart
+ * by default, which is the whole reason these are named lists.
  *
- * This is the ONLY path to `active`. It is not reachable from any user-facing
- * route, which is the point: the deal activates on the processor's word, never
- * on the brand's click.
+ * Deliberately absent from both: contact details (Policy 4.2 keeps the work on
+ * the platform), and on the creator side `payoutMethod`, `pan` and `kyc`
+ * (Policy 2.4). The parties are already in a collaboration together — that
+ * entitles each to know who the other is, not to their bank details.
  */
-export async function confirmEscrowFunded(dealId) {
-    const deal = await Deal.findById(dealId);
-    if (!deal) throw ApiError.notFound('Deal not found');
+const BRAND_PARTY_FIELDS = 'user companyName logo tagline industry location website verifications';
+const CREATOR_PARTY_FIELDS = 'user displayName avatarUrl headline location categories languages';
 
-    // Idempotent — Cashfree retries webhooks.
-    if (deal.state === 'in_progress' || deal.escrow.funded) return deal;
-    if (deal.state !== 'escrow_pending')
-        throw ApiError.unprocessable(`Deal is ${deal.state}, not awaiting escrow`);
+export const getDeal = catchAsync(async (req, res) => {
+    // Not lean: deals predating offers[] get their opening offer written on
+    // first read, so it has a real _id the accept/reject endpoints can address.
+    const deal = await Deal.findById(req.params.id);
+    if (!deal)
+        throw ApiError.notFound();
+    const isParty = [deal.brand.toString(), deal.creator.toString()].includes(req.auth.sub);
+    if (!isParty && req.auth.role !== 'admin')
+        throw ApiError.forbidden();
 
-    return transitionDeal({
-        dealId,
-        to: 'in_progress',
-        actor: 'system',
-        actorId: deal.brand.toString(),
-        note: 'Escrow confirmed by Cashfree webhook',
+    /**
+     * The workspace has to name the brand and the creator, and this returned
+     * neither — `brand` and `creator` were raw ObjectIds, so the collaboration
+     * screen could show a title and two ids. Batched, not fetched per field:
+     * three queries regardless of how the page is rendered.
+     */
+    const [brand, creator, campaign] = await Promise.all([
+        BrandProfile.findOne({ user: deal.brand }).select(BRAND_PARTY_FIELDS).lean(),
+        CreatorProfile.findOne({ user: deal.creator }).select(CREATOR_PARTY_FIELDS).lean(),
+        deal.campaign
+            ? Campaign.findById(deal.campaign).select('title status category images').lean()
+            : null,
+    ]);
+
+    ok(res, {
+        ...deal.toObject(),
+        parties: {
+            /*
+              `null` rather than an invented placeholder when a profile is
+              missing. A deleted account is a real state, and "Unknown creator"
+              is information the UI should decide how to show, not something
+              this endpoint should make up.
+            */
+            brand: brand ?? null,
+            creator: creator ?? null,
+        },
+        campaignSummary: campaign ?? null,
     });
-}
-
+});
 /**
- * Called on a payment-failed webhook (§6, A11). Records the failure and leaves
- * the deal exactly where it is: no automatic retry, no automatic cancellation.
- * The case goes to Admin, who decides what happens next.
+ * Real Cashfree Checkout session (feature: Frontend Cashfree Checkout).
+ * Brand-only, deal must be 'accepted'. Returns paymentSessionId for the
+ * Cashfree JS SDK; does not itself change the deal state — the frontend
+ * calls the normal transition endpoint once Cashfree reports success.
  */
-/**
- * How many failed attempts before a human looks at it.
- *
- * A declined card is an ordinary thing the brand fixes themselves, so raising
- * an admin review on the first failure would fill the queue with cases nobody
- * needs to touch — and tell the brand to wait when what they should do is try a
- * different card. Repeated failures are a different signal.
- *
- * A11's "no automatic retry" is untouched: nothing here retries by itself. The
- * brand asks for a new payment session, which is a person deciding to try again.
- */
-const FAILURES_BEFORE_ADMIN_REVIEW = 3;
-
-export async function flagEscrowFailure(dealId, reason) {
-    const deal = await Deal.findById(dealId);
-    if (!deal) return null;
-
-    const failures = await Transaction.countDocuments({
-        deal: deal._id, type: 'escrow_fund', status: 'failed',
+export const startPaymentSession = catchAsync(async (req, res) => {
+    const result = await createPaymentSession(req.params.id, req.auth.sub);
+    ok(res, result);
+});
+/** Generic transition endpoint — the state machine enforces legality. */
+export const transitionSchema = z.object({
+    to: z.enum(DEAL_STATES),
+    note: z.string().optional(),
+    disputeReason: z.string().optional(),
+    payoutAccount: z.string().optional(),
+});
+export const transition = catchAsync(async (req, res) => {
+    const b = req.body;
+    const actor = req.auth.role === 'admin' ? 'admin' : req.auth.role;
+    const deal = await transitionDeal({
+        dealId: req.params.id,
+        to: b.to,
+        actor,
+        actorId: req.auth.sub,
+        note: b.note,
+        disputeReason: b.disputeReason,
+        payoutAccount: b.payoutAccount,
     });
-    const needsAdmin = failures >= FAILURES_BEFORE_ADMIN_REVIEW;
+    ok(res, deal);
+});
+/**
+ * Creator submits one deliverable (transitions in_progress/revision → submitted).
+ *
+ * ── What a submission is now ───────────────────────────────────────────────
+ *
+ * It was a list of URLs and a note, which is what you send when there is nothing
+ * to upload to. A submission now carries the work itself (uploaded files), where
+ * it can be seen (links), the caption that will run with it, supporting files,
+ * and a message — and it names WHICH agreed deliverable it is for.
+ *
+ * `.strict()`, and links and files are both optional individually but not
+ * together: a submission with neither is an empty review request, and the brand's
+ * clock starts on it either way.
+ */
+const submissionFileInput = z.object({
+    url: z.string().url(),
+    name: z.string().max(300).optional(),
+    contentType: z.string().max(160).optional(),
+    size: z.number().nonnegative().optional(),
+});
 
-    deal.escrow.lastFailure = { reason: reason ?? 'Payment failed', at: new Date() };
-    deal.escrow.needsAdminReview = needsAdmin;
+export const submitWorkSchema = z.object({
+    /** Which agreed deliverable. Optional — briefs without content items exist. */
+    deliverableKey: z.string().max(200).optional(),
+    urls: z.array(z.string().url()).max(10).default([]),
+    files: z.array(submissionFileInput).max(20).default([]),
+    supportingFiles: z.array(submissionFileInput).max(20).default([]),
+    caption: z.string().max(4000).optional(),
+    note: z.string().max(2000).optional(),
+}).strict().refine(
+    (b) => b.urls.length > 0 || b.files.length > 0,
+    { message: 'Add the finished work — upload a file or add a link to it', path: ['urls'] },
+);
+export const submitWork = catchAsync(async (req, res) => {
+    if (req.auth.role !== 'creator')
+        throw ApiError.forbidden();
+    const b = req.body;
+    const deal = await Deal.findById(req.params.id);
+    if (!deal)
+        throw ApiError.notFound();
+    if (deal.creator.toString() !== req.auth.sub)
+        throw ApiError.forbidden();
+
+    /**
+     * Policy 15 — required advertising disclosure must be confirmed BEFORE the
+     * deliverable can be submitted. Blocking here rather than warning, because
+     * 15.5 makes non-disclosure a compliance failure the Platform must prevent,
+     * not merely flag.
+     */
+    if (!deal.disclosure?.confirmedAt)
+        throw new ApiError(422, 'DISCLOSURE_REQUIRED',
+            'Confirm the advertising disclosure for this collaboration before submitting deliverables (Policy 15).');
+
+    /**
+     * Policy 11 — a post-deadline submission is still accepted; it is marked
+     * late rather than blocked. "Late" is 24 hours past the agreed deadline.
+     */
+    const now = new Date();
+    const late = Boolean(deal.terms?.deadline && now > new Date(deal.terms.deadline.getTime() + 24 * 3600 * 1000));
+
+    /*
+      Which deliverable this is for. The key is checked against the agreed list
+      rather than trusted: a key that matches nothing would produce a submission
+      that shows up nowhere, and the creator would believe they had delivered.
+    */
+    const agreed = agreedDeliverables(deal);
+    let deliverable;
+    if (b.deliverableKey) {
+        const match = agreed.find((d) => d.key === b.deliverableKey);
+        if (!match)
+            throw ApiError.unprocessable('That deliverable is not part of the agreed brief');
+        deliverable = {
+            key: match.key, label: match.label,
+            contentType: match.contentType, platform: match.platform,
+        };
+    } else if (agreed.length > 1) {
+        // With one line there is nothing to choose. With several, an untagged
+        // submission leaves the brand guessing what they are reviewing.
+        throw ApiError.unprocessable('Say which deliverable this submission is for');
+    } else if (agreed.length === 1) {
+        deliverable = {
+            key: agreed[0].key, label: agreed[0].label,
+            contentType: agreed[0].contentType, platform: agreed[0].platform,
+        };
+    }
+
+    /**
+     * Appended, never merged into the previous submission.
+     *
+     * A resubmission is a new row with its own files, so the first version and
+     * what the brand said about it both survive. Replacing files in place would
+     * quietly rewrite the thing a revision request was about.
+     */
+    deal.workSubmissions.push({
+        ...(deliverable ? { deliverable } : {}),
+        urls: b.urls,
+        files: [
+            ...b.files.map((f) => toSubmissionFile(f, 'content')),
+            ...b.supportingFiles.map((f) => toSubmissionFile(f, 'support')),
+        ],
+        caption: b.caption ?? '',
+        note: b.note,
+        submittedAt: now,
+        reviewStatus: 'pending',
+        late,
+    });
+
+    // Policy 5.3 — the Brand's 7-day review window opens now. The scheduler
+    // reads this deadline; nothing else needs to know the duration.
+    deal.reviewDeadline = new Date(now.getTime() + REVIEW_WINDOW_DAYS * 24 * 3600 * 1000);
+    deal.reviewRemindersSent = [];
     await deal.save();
 
-    /*
-      The collaboration does not move. It stays exactly where it was —
-      `escrow_pending`, chat still locked — which is what "keep it paused" means
-      here: a failed payment changes nothing except the record of the attempt.
-    */
-    await notify({
-        user: deal.brand.toString(),
-        type: 'deal.escrow_failed',
-        title: 'Advance payment failed',
-        body: needsAdmin
-            ? `The payment for "${deal.title}" has failed ${failures} times. Our team is looking at it — `
-              + 'you can still try again from the collaboration.'
-            : `The payment for "${deal.title}" did not go through, so the collaboration has not started. `
-              + 'You can try again from the collaboration.',
-        data: dealPayload(deal),
-    }).catch(() => void 0);
+    const updated = await transitionDeal({
+        dealId: deal.id, to: 'submitted', actor: 'creator', actorId: req.auth.sub,
+        note: late ? 'Deliverables submitted (late)' : 'Deliverables submitted',
+    });
+    ok(res, updated);
+});
+
+/**
+ * The agreed deliverables and everything submitted against each.
+ *
+ * Read by both parties: the creator needs to know what is left to deliver and
+ * what came back, and the brand needs the same list to review against. One
+ * endpoint, because two derivations of "what is outstanding" is one of them
+ * being wrong on somebody's screen.
+ */
+export const listDeliverables = catchAsync(async (req, res) => {
+    const deal = await Deal.findById(req.params.id);
+    if (!deal) throw ApiError.notFound('Collaboration not found');
+
+    const isParty = [deal.brand.toString(), deal.creator.toString()].includes(req.auth.sub);
+    if (!isParty && req.auth.role !== 'admin') throw ApiError.forbidden();
+
+    const progress = deliverableProgress(deal);
+    ok(res, {
+        ...progress,
+        allApproved: allDeliverablesApproved(deal),
+        outstanding: outstandingDeliverables(deal),
+        revisions: {
+            used: deal.revisionCount ?? 0,
+            allowed: deal.terms?.revisionsAllowed ?? INCLUDED_REVISIONS,
+        },
+        reviewDeadline: deal.reviewDeadline ?? null,
+    });
+});
+
+/**
+ * Move a collaboration into revision, recording who asked and why.
+ *
+ * Shared by the per-submission review below and the deal-level endpoint, so the
+ * Policy 5.4 cap and the Policy 5.5 diversion cannot be enforced on one path and
+ * not the other. It was nearly two paths: the obvious way to write the review
+ * endpoint is to repeat the cap check, and the two copies then disagree the
+ * first time either is changed.
+ */
+async function moveToRevision(deal, { actorId, note }) {
+    const check = canRequestRevision(deal);
+    if (!check.allowed) {
+        // Move to Resolution rather than refusing outright — the Brand still
+        // needs a route forward, and 5.5 defines exactly what it is.
+        deal.resolutionDeadline = new Date(Date.now() + RESOLUTION_AUTO_DAYS * 24 * 3600 * 1000);
+        await deal.save();
+        const moved = await transitionDeal({
+            dealId: deal.id, to: 'resolution', actor: 'brand', actorId,
+            note: `All ${check.limit} agreed revision rounds used — moved to Resolution (Policy 5.5)`,
+        });
+        return {
+            deal: moved,
+            revisionsExhausted: true,
+            message: `You have used all ${check.limit} agreed revision rounds. Choose a resolution option.`,
+        };
+    }
+
+    /**
+     * The counter is incremented by `transitionDeal`, not here — see the note on
+     * the deal-level endpoint below.
+     */
+    const updated = await transitionDeal({
+        dealId: deal.id, to: 'revision', actor: 'brand', actorId,
+        note: note || `Revision ${check.used + 1} of ${check.limit} requested`,
+    });
+    return {
+        deal: updated,
+        revisionsUsed: updated.revisionCount,
+        revisionsAllowed: check.limit,
+        revisionsRemaining: Math.max(0, check.limit - (updated.revisionCount ?? 0)),
+    };
+}
+
+/**
+ * The brand's decision on one submission.
+ *
+ * ── Nothing here approves content on its own ───────────────────────────────
+ *
+ * `approved` is written only by this handler, only for a brand, and only with a
+ * submission id in the request — a deliberate act on a specific piece of work.
+ * The Policy 5.3 sweep completes a collaboration whose review window has run
+ * out and releases the money, as the policy requires, but it does NOT mark any
+ * submission approved: nobody looked at it, and a record saying otherwise would
+ * be a false one. The workspace says which of the two happened.
+ *
+ * ── Approving is not paying ────────────────────────────────────────────────
+ *
+ * This records the decision. Releasing the escrow is the separate, explicit
+ * `completed` transition, and it is refused until every agreed deliverable has
+ * an approval recorded here. Two steps because they are two decisions, and the
+ * money one is irreversible.
+ *
+ * ── Feedback is required on a revision ─────────────────────────────────────
+ *
+ * A revision request without a reason gives the creator nothing to act on;
+ * they resubmit a guess, and it costs one of the agreed rounds.
+ */
+export const reviewSubmissionSchema = z.object({
+    decision: z.enum(['approved', 'revision']),
+    feedback: z.string().max(2000).optional(),
+}).strict().refine(
+    (b) => b.decision !== 'revision' || Boolean(b.feedback?.trim()),
+    { message: 'Say what needs to change', path: ['feedback'] },
+);
+
+export const reviewSubmission = catchAsync(async (req, res) => {
+    const deal = await Deal.findById(req.params.id);
+    if (!deal) throw ApiError.notFound('Collaboration not found');
+    if (deal.brand.toString() !== req.auth.sub) throw ApiError.forbidden();
+
+    const submission = deal.workSubmissions.id(req.params.submissionId);
+    if (!submission) throw ApiError.notFound('Submission not found');
+
+    if (submission.reviewStatus !== 'pending')
+        throw ApiError.conflict('This submission has already been reviewed', {
+            reviewStatus: submission.reviewStatus,
+            decidedAt: submission.review?.at ?? null,
+        });
+
+    const { decision, feedback } = req.body;
+    const at = new Date();
 
     /*
-      The creator is told too. They were waiting for work to start and it has
-      not — leaving them to wonder is how a collaboration quietly dies.
+      The status and the decision record are written together, here and nowhere
+      else. A status with no record cannot answer "when, and on what basis" —
+      the question that matters when a release is disputed later.
     */
+    submission.review = {
+        decision,
+        feedback: feedback?.trim() ?? '',
+        at,
+        by: new Types.ObjectId(req.auth.sub),
+    };
+    submission.reviewStatus = decision === 'approved' ? 'approved' : 'rejected';
+    submission.reviewNote = feedback?.trim() ?? '';
+
+    if (decision === 'revision') {
+        await deal.save();
+        const result = await moveToRevision(deal, { actorId: req.auth.sub, note: feedback?.trim() });
+        await notify({
+            user: deal.creator.toString(),
+            type: 'deal.revision_requested',
+            title: 'A revision was requested',
+            body: `"${deal.title}" — ${feedback?.trim() || 'the brand asked for changes'}`,
+            data: dealPayload(deal),
+        }).catch(() => void 0);
+        return ok(res, result);
+    }
+
+    await deal.save();
+
+    const allApproved = allDeliverablesApproved(deal);
     await notify({
         user: deal.creator.toString(),
-        type: 'deal.escrow_failed',
-        title: 'Waiting on the advance payment',
-        body: `The advance for "${deal.title}" has not gone through yet, so the collaboration has not started. `
-            + 'The brand has been asked to try again.',
+        type: 'deal.submission_approved',
+        title: 'Your submission was approved',
+        body: allApproved
+            ? `"${deal.title}" — every deliverable is approved. Payment is released when the brand closes the collaboration.`
+            : `"${deal.title}" — ${submission.deliverable?.label ?? 'your submission'} was approved.`,
         data: dealPayload(deal),
     }).catch(() => void 0);
 
-    return deal;
+    ok(res, {
+        deal,
+        submission: submission.toObject(),
+        allApproved,
+        outstanding: outstandingDeliverables(deal),
+    });
+});
+
+/**
+ * Policy 5.4 — a revision request is only valid while agreed rounds remain.
+ * Once they are exhausted the Collaboration moves to Resolution (Policy 5.5)
+ * instead of silently accepting a third round.
+ *
+ * Kept as the collaboration-level route. The workspace reviews a specific
+ * submission (above), which records the decision against it; this stays for
+ * callers that have no submission in hand, and both run the same cap check.
+ */
+export const requestRevision = catchAsync(async (req, res) => {
+    const deal = await Deal.findById(req.params.id);
+    if (!deal) throw ApiError.notFound();
+    if (deal.brand.toString() !== req.auth.sub) throw ApiError.forbidden();
+
+    /**
+     * The revision counter is incremented by `transitionDeal`, not here.
+     *
+     * Both used to do it: this handler added one and saved, then
+     * `applyStateSideEffects` in deals.service.js added another on the
+     * `→ revision` transition. Every revision request therefore consumed two
+     * rounds, so a deal with three included revisions was pushed into
+     * Resolution after the brand's *second* request — and the note told them
+     * they had used "revision 2 of 3" while the stored count was 4.
+     *
+     * The state machine owns state changes; that is the rule this module states
+     * everywhere else, and it is the half that has to stay.
+     */
+    ok(res, await moveToRevision(deal, { actorId: req.auth.sub, note: req.body?.note }));
+});
+
+/** Policy 15 — the Creator confirms the disclosure that will appear on the content. */
+export const confirmDisclosureSchema = z.object({
+    method: z.enum(['#ad', '#advertisement', '#sponsored', '#paidpartnership', '#collab', 'platform_tool']),
+    placement: z.string().max(200).optional(),
+    language: z.string().max(40).optional(),
+});
+export const confirmDisclosure = catchAsync(async (req, res) => {
+    const deal = await Deal.findById(req.params.id);
+    if (!deal) throw ApiError.notFound();
+    if (deal.creator.toString() !== req.auth.sub) throw ApiError.forbidden();
+
+    deal.disclosure = {
+        method: req.body.method,
+        placement: req.body.placement,
+        language: req.body.language,
+        confirmedAt: new Date(),
+        confirmedBy: new Types.ObjectId(req.auth.sub),
+    };
+    await deal.save();
+    ok(res, deal.disclosure);
+});
+
+
+/* ── Structured negotiation (scope §11, §12) ─────────────────────────────
+ * Offers and counter-offers are versioned records in their own collection.
+ * Both parties may hold a live offer at once; immutability, not turn-taking,
+ * is what stops terms being silently revised. */
+
+/**
+ * A proposal, as one party sends it.
+ *
+ * Every field is a term of the work rather than a price with a covering note,
+ * because a counter-proposal has to be able to say "the money is fine, the
+ * usage rights are not" — and with an amount-only offer it could not. The
+ * vocabulary is the campaign brief's, so a proposal that followed an
+ * application and one sent to a creator found in discovery read the same.
+ *
+ * `.strict()`: a misspelled field used to be dropped silently, which on a
+ * document that becomes binding is the worst possible failure.
+ */
+export const offerSchema = z.object({
+    amount: z.number().min(0),
+    deliverables: z.string().max(4000).default(''),
+
+    /** Content type and quantity as rows, not a sentence. */
+    contentItems: z.array(z.object({
+        contentType: z.string().min(1).max(60),
+        quantity: z.number().int().min(1).max(500).default(1),
+        platform: z.string().max(40).optional(),
+        notes: z.string().max(500).optional(),
+    })).max(20).optional(),
+
+    guidelines: z.object({
+        dos: z.array(z.string().max(300)).max(20).optional(),
+        donts: z.array(z.string().max(300)).max(20).optional(),
+        hashtags: z.array(z.string().max(60)).max(20).optional(),
+        mentions: z.array(z.string().max(60)).max(20).optional(),
+        notes: z.string().max(2000).optional(),
+    }).optional(),
+
+    /** Timeline: when work starts, and when it is due. */
+    startDate: z.string().optional(),
+    deadline: z.string().optional(),
+
+    /** Policy 8 — scope, and therefore negotiable. */
+    usageRights: z.object({
+        licenceType: z.enum(['default', 'extended', 'full_assignment']).optional(),
+        durationMonths: z.number().int().min(1).max(120).optional(),
+        paidAdvertising: z.boolean().optional(),
+        whitelisting: z.boolean().optional(),
+        modificationAllowed: z.boolean().optional(),
+        notes: z.string().max(1000).optional(),
+    }).optional(),
+    exclusivity: z.string().max(500).optional(),
+    otherTerms: z.string().max(2000).optional(),
+
+    revisionsAllowed: z.number().min(0).max(10).optional(),
+
+    // Optional, chosen by the proposer (§4).
+    expiresAt: z.string().optional(),
+    note: z.string().max(500).optional(),
+}).strict();
+
+function party(req) {
+    if (req.auth.role !== 'brand' && req.auth.role !== 'creator')
+        throw ApiError.forbidden('Only the brand or creator on a deal can negotiate');
+    return req.auth.role;
 }
+
+export const createOffer = catchAsync(async (req, res) => {
+    const offer = await postOffer({
+        dealId: req.params.id,
+        actorId: req.auth.sub,
+        actorRole: party(req),
+        terms: req.body,
+    });
+    created(res, offer);
+});
+
+/**
+ * The negotiation on a collaboration: the thread and every proposal version.
+ *
+ * There was no way to read this. The panel read `deal.offers`, a field removed
+ * when offers moved to their own collection, so it rendered an empty history
+ * for every negotiation and could never find the accepted proposal it needed in
+ * order to show the confirm step.
+ *
+ * A read does not open a thread — `create: false`. Looking at a collaboration
+ * must not create state, and a deal that has not reached negotiation yet
+ * correctly answers "no proposals".
+ */
+export const getNegotiation = catchAsync(async (req, res) => {
+    const { deal, thread } = await threadForDeal(req.params.id);
+
+    const isParty = [deal.brand.toString(), deal.creator.toString()].includes(req.auth.sub);
+    if (!isParty && req.auth.role !== 'admin') throw ApiError.forbidden();
+
+    if (!thread) return ok(res, { thread: null, offers: [] });
+
+    // Newest first — the version a person needs to act on is the latest one.
+    const offers = await Offer.find({ thread: thread._id }).sort({ seq: -1 });
+    ok(res, { thread: thread.toJSON(), offers: offers.map((o) => o.toJSON()) });
+});
+
+export const acceptOfferHandler = catchAsync(async (req, res) => {
+    const deal = await acceptOffer({
+        dealId: req.params.id,
+        offerId: req.params.offerId,
+        actorId: req.auth.sub,
+        actorRole: party(req),
+    });
+    ok(res, deal);
+});
+
+export const rejectOfferSchema = z.object({ note: z.string().max(500).optional() });
+export const rejectOfferHandler = catchAsync(async (req, res) => {
+    const deal = await rejectOffer({
+        dealId: req.params.id,
+        offerId: req.params.offerId,
+        actorId: req.auth.sub,
+        actorRole: party(req),
+        note: req.body?.note,
+    });
+    ok(res, deal);
+});
+
+/**
+ * Confirm terms (§5). Both parties confirm separately; the second confirmation
+ * moves the deal to `terms_agreed` and locks the terms.
+ */
+export const confirmTermsHandler = catchAsync(async (req, res) => {
+    // confirmTerms returns { deal, agreed } — `agreed` is true only on the
+    // second confirmation, which is what moved the deal to terms_agreed. The
+    // UI needs it to know whether to show "waiting on them" or "fund escrow".
+    const { deal, agreed } = await confirmTerms({
+        dealId: req.params.id,
+        actorId: req.auth.sub,
+        actorRole: party(req),
+    });
+    ok(res, { deal, agreed });
+});
+
+/** Reject the whole deal — only before terms are agreed (§7). */
+export const rejectDealSchema = z.object({ note: z.string().max(500).optional() });
+export const rejectDealHandler = catchAsync(async (req, res) => {
+    const deal = await rejectDeal({
+        dealId: req.params.id,
+        actorId: req.auth.sub,
+        actorRole: party(req),
+        note: req.body?.note,
+    });
+    ok(res, deal);
+});
+
+
+/* ── Cancellation (Policy 7.1, 7.2, 28) ──────────────────────────────────
+ * Policy 28: "Never make the user confirm a cancellation without showing the
+ * applicable consequence first." So cancellation is two calls: a preview that
+ * computes the exact money outcome for the current stage, and an execute that
+ * performs it. The preview is a GET and changes nothing.
+ */
+
+/** What cancelling right now would cost. Read-only. */
+export const previewCancellation = catchAsync(async (req, res) => {
+    const deal = await Deal.findById(req.params.id).lean();
+    if (!deal) throw ApiError.notFound('Collaboration not found');
+
+    const role = req.auth.role;
+    const isParty = [deal.brand.toString(), deal.creator.toString()].includes(req.auth.sub);
+    if (!isParty && role !== 'admin') throw ApiError.forbidden();
+
+    const check = canCancel(deal.state, role);
+    if (!check.allowed) {
+        return ok(res, {
+            allowed: false,
+            reason: check.reason,
+            state: deal.state,
+        });
+    }
+
+    const agreedValue = deal.escrow?.amount ?? deal.terms?.amount ?? 0;
+    const funded = Boolean(deal.escrow?.funded);
+
+    // Nothing is held yet, so there is nothing to settle.
+    if (!funded) {
+        return ok(res, {
+            allowed: true,
+            state: deal.state,
+            escrowFunded: false,
+            agreedValue,
+            creatorReceives: 0,
+            brandRefund: 0,
+            commission: 0,
+            summary: 'No payment has been made yet, so nothing will be charged or refunded.',
+        });
+    }
+
+    const outcome = role === 'creator'
+        ? creatorCancellationOutcome({ state: deal.state, agreedValue, commissionPct: deal.commission?.ratePct })
+        : brandCancellationOutcome({ state: deal.state, agreedValue, commissionPct: deal.commission?.ratePct });
+
+    // Plain-language summary per stage, so the consequence is understandable
+    // rather than a table of numbers (Policy 28).
+    const SUMMARY = {
+        accepted: 'Work has not started, so the full amount is refunded to the Brand.',
+        escrow_pending: 'Work has not started, so the full amount is refunded to the Brand.',
+        in_progress: role === 'brand'
+            ? 'Work has begun, so the Creator keeps 25% as a cancellation fee and 75% is refunded to you.'
+            : 'You are cancelling work you have begun, so the Brand is refunded in full unless they accept partial deliverables.',
+        submitted: 'The Creator has already delivered, so they receive the full fee and no refund is due.',
+        revision: 'The Creator has already delivered, so they receive the full fee and no refund is due.',
+    };
+
+    ok(res, {
+        allowed: true,
+        state: deal.state,
+        escrowFunded: true,
+        agreedValue,
+        creatorReceives: outcome.creatorNet,
+        creatorGross: outcome.creatorGross,
+        commission: outcome.commission,
+        commissionPct: outcome.commissionPct,
+        brandRefund: outcome.brandRefund,
+        summary: SUMMARY[deal.state] ?? 'The outcome will follow the cancellation policy for this stage.',
+        irreversible: true,
+    });
+});
+
+export const cancelDealSchema = z.object({ reason: z.string().max(500).optional() });
+
+/**
+ * Execute the cancellation. The settlement is computed server-side from the
+ * stage — the client cannot propose amounts, because Policy 7.1 fixes them.
+ */
+export const cancelDeal = catchAsync(async (req, res) => {
+    const deal = await Deal.findById(req.params.id).lean();
+    if (!deal) throw ApiError.notFound('Collaboration not found');
+
+    const role = req.auth.role;
+    const isParty = [deal.brand.toString(), deal.creator.toString()].includes(req.auth.sub);
+    if (!isParty && role !== 'admin') throw ApiError.forbidden();
+
+    const check = canCancel(deal.state, role);
+    if (!check.allowed) throw ApiError.unprocessable(check.reason);
+
+    const updated = await transitionDeal({
+        dealId: req.params.id,
+        to: 'cancelled',
+        actor: role,
+        actorId: req.auth.sub,
+        note: req.body?.reason,
+    });
+    ok(res, updated);
+});
+
+/* ───────────────── Policy 5.5 option B — additional paid revisions ─────────── */
+
+export const proposeAdditionalTermsSchema = z.object({
+    amount: z.number().positive(),
+    revisionsAdded: z.number().int().min(1).max(10),
+    scopeNote: z.string().max(2000).optional(),
+    deadline: z.string().optional(),
+}).strict();
+
+/**
+ * The brand offers to pay for further revisions.
+ *
+ * A fourth revision is new scope, not an entitlement: this creates a proposal
+ * the creator can refuse. Nothing about the deal changes until they accept AND
+ * the money is in escrow.
+ */
+export const proposeAdditionalTerms = catchAsync(async (req, res) => {
+    const deal = await additionalTerms.proposeAdditionalTerms({
+        dealId: req.params.id,
+        actorId: req.auth.sub,
+        ...req.body,
+    });
+    ok(res, { deal, preview: additionalTerms.previewAdditionalTerms(deal) });
+});
+
+export const respondAdditionalTermsSchema = z.object({
+    accept: z.boolean(),
+    declineReason: z.string().max(1000).optional(),
+}).strict();
+
+/** The creator accepts or declines. Only they can. */
+export const respondToAdditionalTerms = catchAsync(async (req, res) => {
+    const deal = await additionalTerms.respondToAdditionalTerms({
+        dealId: req.params.id,
+        actorId: req.auth.sub,
+        ...req.body,
+    });
+    ok(res, { deal, preview: additionalTerms.previewAdditionalTerms(deal) });
+});
+
+/** Checkout session for accepted additional terms. */
+export const startAdditionalTermsPayment = catchAsync(async (req, res) => {
+    ok(res, await additionalTerms.createAdditionalTermsPaymentSession(req.params.id, req.auth.sub));
+});
+
+/* ── Change Requests (locked terms) ────────────────────────────────────────
+ *
+ * The only way agreed terms may change. One party asks, the other answers, and
+ * an accepted request appends an amendment rather than rewriting the agreement
+ * — see modules/deals/changeRequest.service.js.
+ */
+
+/**
+ * `.strict()` and a field allow-list. A change request is the one document in
+ * this system that edits something already binding, so a misspelled field must
+ * be refused loudly rather than dropped into a no-op the other party then
+ * "accepts".
+ */
+export const changeRequestSchema = z.object({
+    changes: z.object({
+        amount: z.number().min(0).optional(),
+        deliverables: z.string().max(4000).optional(),
+        contentItems: z.array(z.object({
+            contentType: z.string().min(1).max(60),
+            quantity: z.number().int().min(1).max(500).default(1),
+            platform: z.string().max(40).optional(),
+            notes: z.string().max(500).optional(),
+        })).max(20).optional(),
+        guidelines: z.object({
+            dos: z.array(z.string().max(300)).max(20).optional(),
+            donts: z.array(z.string().max(300)).max(20).optional(),
+            hashtags: z.array(z.string().max(60)).max(20).optional(),
+            mentions: z.array(z.string().max(60)).max(20).optional(),
+            notes: z.string().max(2000).optional(),
+        }).optional(),
+        startDate: z.string().optional(),
+        deadline: z.string().optional(),
+        usageRights: z.object({
+            licenceType: z.enum(['default', 'extended', 'full_assignment']).optional(),
+            durationMonths: z.number().int().min(1).max(120).optional(),
+            paidAdvertising: z.boolean().optional(),
+            whitelisting: z.boolean().optional(),
+            modificationAllowed: z.boolean().optional(),
+            notes: z.string().max(1000).optional(),
+        }).optional(),
+        exclusivity: z.string().max(500).optional(),
+        otherTerms: z.string().max(2000).optional(),
+        revisionsAllowed: z.number().int().min(0).max(20).optional(),
+    }).strict(),
+    /** Required: the other party is being asked to give something up. */
+    reason: z.string().min(10).max(1000),
+}).strict();
+
+export const proposeChangeRequest = catchAsync(async (req, res) => {
+    const { changeRequest } = await changeRequest_propose({
+        dealId: req.params.id,
+        actorId: req.auth.sub,
+        actorRole: party(req),
+        changes: req.body.changes,
+        reason: req.body.reason,
+    });
+    created(res, changeRequest);
+});
+
+export const respondChangeRequestSchema = z.object({
+    accept: z.boolean(),
+    note: z.string().max(1000).optional(),
+}).strict();
+
+export const respondChangeRequest = catchAsync(async (req, res) => {
+    const { deal, changeRequest, amendment } = await changeRequest_respond({
+        dealId: req.params.id,
+        requestId: req.params.requestId,
+        actorId: req.auth.sub,
+        actorRole: party(req),
+        accept: req.body.accept,
+        note: req.body.note,
+    });
+    ok(res, { deal, changeRequest, amendment });
+});
+
+export const withdrawChangeRequest = catchAsync(async (req, res) => {
+    const { changeRequest } = await changeRequest_withdraw({
+        dealId: req.params.id,
+        requestId: req.params.requestId,
+        actorId: req.auth.sub,
+        actorRole: party(req),
+    });
+    ok(res, changeRequest);
+});
+
+/** The agreement, what applies now, and every change asked for along the way. */
+export const getTermsHistory = catchAsync(async (req, res) => {
+    const deal = await Deal.findById(req.params.id);
+    if (!deal) throw ApiError.notFound('Collaboration not found');
+
+    const isParty = [deal.brand.toString(), deal.creator.toString()].includes(req.auth.sub);
+    if (!isParty && req.auth.role !== 'admin') throw ApiError.forbidden();
+
+    ok(res, changeRequest_history(deal));
+});
+
+/* ── Payment records and state ─────────────────────────────────────────────
+ *
+ * The ledger for one collaboration. Both parties may read it: a creator waiting
+ * to start needs to see whether the advance is pending, failed or verified, and
+ * "ask the brand" is not an answer a platform should give.
+ */
+export const listDealPayments = catchAsync(async (req, res) => {
+    const deal = await Deal.findById(req.params.id).select('brand creator').lean();
+    if (!deal) throw ApiError.notFound('Collaboration not found');
+
+    const isParty = [deal.brand.toString(), deal.creator.toString()].includes(req.auth.sub);
+    if (!isParty && req.auth.role !== 'admin') throw ApiError.forbidden();
+
+    ok(res, await paymentRecords(req.params.id));
+});
+
+/**
+ * The brand opened checkout.
+ *
+ * Client-reported, and therefore trusted for nothing beyond showing both
+ * parties that a payment is under way. It cannot verify anything — only the
+ * signature-verified webhook writes `verified`.
+ */
+export const paymentInitiated = catchAsync(async (req, res) => {
+    const txn = await markPaymentInitiated(req.params.id, req.auth.sub);
+    ok(res, txn);
+});

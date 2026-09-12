@@ -26,11 +26,19 @@ const when = (d) => (d ? new Date(d).toLocaleDateString('en-IN', {
   day: 'numeric', month: 'short', year: 'numeric',
 }) : '');
 
-/** A URL's last readable segment, for a deliverable link with no name of its own. */
+/**
+ * A readable name for a link that has none of its own.
+ *
+ * Host as well as the last segment: an Instagram story URL ends in its numeric
+ * id, so the last segment alone rendered as "123" in the file list, which tells
+ * the reader nothing about what they are about to open.
+ */
 function nameFromUrl(url) {
   try {
-    const path = new URL(url).pathname;
-    return decodeURIComponent(path.split('/').filter(Boolean).pop() ?? '') || url;
+    const u = new URL(url);
+    const last = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() ?? '');
+    const host = u.hostname.replace(/^www\./, '');
+    return last ? `${host}/${last}` : host;
   } catch {
     return url;
   }
@@ -59,12 +67,30 @@ export function collectFiles({ messages = [], deal }) {
   }
 
   (deal?.workSubmissions ?? []).forEach((s, i) => {
+    const which = deal.workSubmissions.length > 1 ? ` · submission ${i + 1}` : '';
+    const label = s.deliverable?.label ? `${s.deliverable.label}${which}` : `Deliverable${which}`;
+
+    /*
+      Uploaded files as well as links. They were missed at first: the list read
+      `urls` only, so a reel uploaded through the submission form — the thing the
+      brand most wants to open — did not appear in the files list at all.
+    */
+    for (const f of s.files ?? []) {
+      out.push({
+        url: f.url,
+        name: f.name || 'File',
+        kind: f.kind === 'image' ? 'image' : 'file',
+        source: f.role === 'support' ? `Supporting${which}` : label,
+        at: s.submittedAt,
+      });
+    }
+
     for (const url of s.urls ?? []) {
       out.push({
         url,
         name: nameFromUrl(url),
         kind: 'link',
-        source: `Deliverable${(deal.workSubmissions.length > 1) ? ` · submission ${i + 1}` : ''}`,
+        source: label,
         at: s.submittedAt,
       });
     }

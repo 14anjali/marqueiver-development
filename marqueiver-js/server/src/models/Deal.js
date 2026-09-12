@@ -1,10 +1,73 @@
 import { Schema, model } from 'mongoose';
+/**
+ * One file attached to a submission.
+ *
+ * `kind` is derived from the content type the uploader's own file reported, by
+ * the same `deliverableFileKind` used for message attachments — never from the
+ * URL, which is signed and usually ends in a query string. `role` separates the
+ * work itself from the things that support it: a brand reviewing a reel should
+ * not have to guess which of five files is the reel.
+ */
+const submissionFileSchema = new Schema({
+    url: { type: String, required: true },
+    name: { type: String, default: '' },
+    contentType: { type: String, default: '' },
+    kind: { type: String, enum: ['image', 'video', 'file'], default: 'file' },
+    size: { type: Number },
+    role: { type: String, enum: ['content', 'support'], default: 'content' },
+}, { _id: false });
+
 const submissionSchema = new Schema({
+    /**
+     * Which agreed deliverable this is.
+     *
+     * `key` indexes into the agreed `contentItems`; `label` is frozen at
+     * submission time, because the terms can be amended afterwards and a
+     * submission must keep saying what it was submitted against. Optional:
+     * collaborations agreed before this existed, and briefs with no structured
+     * items, submit against the collaboration as a whole.
+     */
+    deliverable: {
+        key: String,
+        label: String,
+        contentType: String,
+        platform: String,
+    },
+
+    /** Where the finished work can be seen — a post, a Drive file, a preview. */
     urls: { type: [String], default: [] },
+
+    /** Uploaded files: the work itself, and anything supporting it. */
+    files: { type: [submissionFileSchema], default: [] },
+
+    /** The copy that goes with the post, for the brand to approve or correct. */
+    caption: { type: String, default: '' },
+
+    /** The creator's message with this submission. */
     note: String,
     submittedAt: { type: Date, default: Date.now },
     reviewStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
     reviewNote: String,
+
+    /**
+     * The brand's decision on THIS submission, recorded as an event.
+     *
+     * `reviewStatus` says where the submission stands; this says who decided
+     * it, when, and what they said. Both are written together in one place
+     * (`reviewSubmission`), because a status without a decision record cannot
+     * answer "when did they approve it, and on what basis" — which is the
+     * question that matters when a payment is disputed weeks later.
+     *
+     * Nothing ever writes `approved` except a brand acting deliberately. The
+     * Policy 5.3 deadline sweep completes the collaboration; it does not mark
+     * anybody's content approved, because no one looked at it.
+     */
+    review: {
+        decision: { type: String, enum: ['approved', 'revision'] },
+        feedback: { type: String, default: '' },
+        at: Date,
+        by: { type: Schema.Types.ObjectId, ref: 'User' },
+    },
     /**
      * §11 — a creator may still submit after the deadline; the submission is
      * marked late rather than blocked. Nothing auto-cancels at the deadline.

@@ -65,10 +65,12 @@ function Dot({ state, index }) {
   return <span className={cls} aria-hidden="true">{index + 1}</span>;
 }
 
-export default function CollaborationStepper({ deal, role, payments = [], className = '' }) {
-  const status = collaborationStatus(deal, { payments });
-  const stages = stageStates(deal, { payments });
-  const action = nextAction(deal, role, { payments });
+export default function CollaborationStepper({
+  deal, role, payments = [], deliverablesApproved = false, className = '',
+}) {
+  const status = collaborationStatus(deal, { payments, deliverablesApproved });
+  const stages = stageStates(deal, { payments, deliverablesApproved });
+  const action = nextAction(deal, role, { payments, deliverablesApproved });
   const off = OFF_PATH[status.id] ? status : null;
 
   return (

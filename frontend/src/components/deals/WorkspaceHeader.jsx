@@ -71,8 +71,10 @@ function Party({ label, name, sub, avatar, verified, to }) {
   );
 }
 
-export default function WorkspaceHeader({ deal, role, payments = [], binding }) {
-  const status = collaborationStatus(deal, { payments });
+export default function WorkspaceHeader({
+  deal, role, payments = [], binding, deliverablesApproved = false,
+}) {
+  const status = collaborationStatus(deal, { payments, deliverablesApproved });
   const brand = deal.parties?.brand ?? null;
   const creator = deal.parties?.creator ?? null;
   const campaign = deal.campaignSummary ?? null;
@@ -162,7 +164,10 @@ export default function WorkspaceHeader({ deal, role, payments = [], binding }) 
 
       {/* ── where it is, and whose move ──────────────────────────────── */}
       <div className="mt-4 pt-4 border-t border-line">
-        <CollaborationStepper deal={deal} role={role} payments={payments} />
+        <CollaborationStepper
+          deal={deal} role={role} payments={payments}
+          deliverablesApproved={deliverablesApproved}
+        />
       </div>
     </section>
   );

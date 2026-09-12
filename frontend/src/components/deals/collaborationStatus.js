@@ -116,7 +116,7 @@ const creatorPaid = (deal) =>
  * `payments` is the payment record, used only for the one case the deal alone
  * cannot express: money verified, collaboration not started.
  */
-export function collaborationStatus(deal, { payments = [] } = {}) {
+export function collaborationStatus(deal, { payments = [], deliverablesApproved = false } = {}) {
   const state = deal?.state;
 
   if (state === 'cancelled') return status('cancelled', 'Cancelled');
@@ -124,7 +124,18 @@ export function collaborationStatus(deal, { payments = [] } = {}) {
   if (state === 'disputed') return status('disputed', 'Disputed');
   if (state === 'resolution') return status('resolution', OFF_PATH.resolution);
   if (state === 'revision') return status('revision_requested', OFF_PATH.revision_requested);
-  if (state === 'submitted') return status('submitted', 'Deliverable submitted');
+  /*
+    Approved, but not yet released. The deal state is still `submitted` because
+    releasing the escrow is what closes it — and between the brand's approval and
+    that release, "Deliverable submitted" is a stale answer to "where is this".
+    Caught in the rendered page: everything approved, and the stepper still
+    showed Approved as pending.
+  */
+  if (state === 'submitted') {
+    return deliverablesApproved
+      ? status('approved', 'Approved')
+      : status('submitted', 'Deliverable submitted');
+  }
   if (state === 'in_progress') return status('active', 'Active');
 
   if (state === 'completed') {
@@ -160,8 +171,8 @@ function status(id, label) {
  * the difference between a creator waiting to submit work and a creator who
  * cannot submit because the brand has not paid.
  */
-export function stageStates(deal, { payments = [] } = {}) {
-  const current = collaborationStatus(deal, { payments });
+export function stageStates(deal, { payments = [], deliverablesApproved = false } = {}) {
+  const current = collaborationStatus(deal, { payments, deliverablesApproved });
   const paid = advanceVerified(deal);
   const ended = ['cancelled', 'declined'].includes(deal?.state);
 
@@ -172,7 +183,14 @@ export function stageStates(deal, { payments = [] } = {}) {
     active: paid,
     submitted: paid && ['submitted', 'revision', 'resolution', 'disputed', 'completed']
       .includes(deal?.state),
-    approved: deal?.state === 'completed',
+    /*
+      The brand's approvals are recorded on the submissions, so this stage is
+      reached before the collaboration closes: approving the work and releasing
+      the money are two acts, and between them the work IS approved. Saying
+      otherwise leaves a brand who has approved everything looking at a stepper
+      that still says "review the deliverables".
+    */
+    approved: deal?.state === 'completed' || deliverablesApproved,
     payment_completed: creatorPaid(deal),
     completed: deal?.state === 'completed' && escrowReleased(deal),
   };
@@ -203,7 +221,7 @@ export function stageStates(deal, { payments = [] } = {}) {
  * why there is nothing for them to do. "Waiting on the brand" is a genuine
  * answer; a blank space is not.
  */
-export function nextAction(deal, role, { payments = [] } = {}) {
+export function nextAction(deal, role, { payments = [], deliverablesApproved = false } = {}) {
   const other = role === 'brand' ? 'the creator' : 'the brand';
   const you = role === 'brand' ? 'brand' : 'creator';
   const s = deal?.state;
@@ -258,6 +276,11 @@ export function nextAction(deal, role, { payments = [] } = {}) {
   }
 
   if (s === 'submitted') {
+    if (deliverablesApproved) {
+      return role === 'brand'
+        ? { mine: true, text: 'Every deliverable is approved. Release the payment to close the collaboration.' }
+        : { mine: false, text: 'Approved. Waiting for the brand to release the payment.' };
+    }
     return role === 'brand'
       ? { mine: true, text: 'Review the deliverables — approve them, or request a revision.' }
       : { mine: false, text: 'Submitted. Waiting for the brand to review it.' };
@@ -291,11 +314,11 @@ export function nextAction(deal, role, { payments = [] } = {}) {
 }
 
 /** Everything a workspace needs to say where it is, in one call. */
-export function workspaceStatus(deal, role, { payments = [] } = {}) {
+export function workspaceStatus(deal, role, { payments = [], deliverablesApproved = false } = {}) {
   return {
-    status: collaborationStatus(deal, { payments }),
-    stages: stageStates(deal, { payments }),
-    action: nextAction(deal, role, { payments }),
+    status: collaborationStatus(deal, { payments, deliverablesApproved }),
+    stages: stageStates(deal, { payments, deliverablesApproved }),
+    action: nextAction(deal, role, { payments, deliverablesApproved }),
     paid: advanceVerified(deal),
   };
 }

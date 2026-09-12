@@ -18,6 +18,10 @@ import {
     withdrawChange as changeRequest_withdraw,
     changeHistory as changeRequest_history,
 } from './changeRequest.service.js';
+import {
+    agreedDeliverables, deliverableProgress, toSubmissionFile,
+    allDeliverablesApproved, outstandingDeliverables,
+} from './deliverables.service.js';
 import { notify, dealPayload } from '../notifications/notifications.service.js';
 import { DEAL_STATES } from '../../../../shared/types.js';
 /**
@@ -255,11 +259,39 @@ export const transition = catchAsync(async (req, res) => {
     });
     ok(res, deal);
 });
-/** Creator submits deliverables (transitions in_progress/revision → submitted). */
-export const submitWorkSchema = z.object({
-    urls: z.array(z.string()).min(1),
-    note: z.string().optional(),
+/**
+ * Creator submits one deliverable (transitions in_progress/revision → submitted).
+ *
+ * ── What a submission is now ───────────────────────────────────────────────
+ *
+ * It was a list of URLs and a note, which is what you send when there is nothing
+ * to upload to. A submission now carries the work itself (uploaded files), where
+ * it can be seen (links), the caption that will run with it, supporting files,
+ * and a message — and it names WHICH agreed deliverable it is for.
+ *
+ * `.strict()`, and links and files are both optional individually but not
+ * together: a submission with neither is an empty review request, and the brand's
+ * clock starts on it either way.
+ */
+const submissionFileInput = z.object({
+    url: z.string().url(),
+    name: z.string().max(300).optional(),
+    contentType: z.string().max(160).optional(),
+    size: z.number().nonnegative().optional(),
 });
+
+export const submitWorkSchema = z.object({
+    /** Which agreed deliverable. Optional — briefs without content items exist. */
+    deliverableKey: z.string().max(200).optional(),
+    urls: z.array(z.string().url()).max(10).default([]),
+    files: z.array(submissionFileInput).max(20).default([]),
+    supportingFiles: z.array(submissionFileInput).max(20).default([]),
+    caption: z.string().max(4000).optional(),
+    note: z.string().max(2000).optional(),
+}).strict().refine(
+    (b) => b.urls.length > 0 || b.files.length > 0,
+    { message: 'Add the finished work — upload a file or add a link to it', path: ['urls'] },
+);
 export const submitWork = catchAsync(async (req, res) => {
     if (req.auth.role !== 'creator')
         throw ApiError.forbidden();
@@ -287,8 +319,51 @@ export const submitWork = catchAsync(async (req, res) => {
     const now = new Date();
     const late = Boolean(deal.terms?.deadline && now > new Date(deal.terms.deadline.getTime() + 24 * 3600 * 1000));
 
+    /*
+      Which deliverable this is for. The key is checked against the agreed list
+      rather than trusted: a key that matches nothing would produce a submission
+      that shows up nowhere, and the creator would believe they had delivered.
+    */
+    const agreed = agreedDeliverables(deal);
+    let deliverable;
+    if (b.deliverableKey) {
+        const match = agreed.find((d) => d.key === b.deliverableKey);
+        if (!match)
+            throw ApiError.unprocessable('That deliverable is not part of the agreed brief');
+        deliverable = {
+            key: match.key, label: match.label,
+            contentType: match.contentType, platform: match.platform,
+        };
+    } else if (agreed.length > 1) {
+        // With one line there is nothing to choose. With several, an untagged
+        // submission leaves the brand guessing what they are reviewing.
+        throw ApiError.unprocessable('Say which deliverable this submission is for');
+    } else if (agreed.length === 1) {
+        deliverable = {
+            key: agreed[0].key, label: agreed[0].label,
+            contentType: agreed[0].contentType, platform: agreed[0].platform,
+        };
+    }
+
+    /**
+     * Appended, never merged into the previous submission.
+     *
+     * A resubmission is a new row with its own files, so the first version and
+     * what the brand said about it both survive. Replacing files in place would
+     * quietly rewrite the thing a revision request was about.
+     */
     deal.workSubmissions.push({
-        urls: b.urls, note: b.note, submittedAt: now, reviewStatus: 'pending', late,
+        ...(deliverable ? { deliverable } : {}),
+        urls: b.urls,
+        files: [
+            ...b.files.map((f) => toSubmissionFile(f, 'content')),
+            ...b.supportingFiles.map((f) => toSubmissionFile(f, 'support')),
+        ],
+        caption: b.caption ?? '',
+        note: b.note,
+        submittedAt: now,
+        reviewStatus: 'pending',
+        late,
     });
 
     // Policy 5.3 — the Brand's 7-day review window opens now. The scheduler
@@ -305,15 +380,43 @@ export const submitWork = catchAsync(async (req, res) => {
 });
 
 /**
- * Policy 5.4 — a revision request is only valid while agreed rounds remain.
- * Once they are exhausted the Collaboration moves to Resolution (Policy 5.5)
- * instead of silently accepting a third round.
+ * The agreed deliverables and everything submitted against each.
+ *
+ * Read by both parties: the creator needs to know what is left to deliver and
+ * what came back, and the brand needs the same list to review against. One
+ * endpoint, because two derivations of "what is outstanding" is one of them
+ * being wrong on somebody's screen.
  */
-export const requestRevision = catchAsync(async (req, res) => {
+export const listDeliverables = catchAsync(async (req, res) => {
     const deal = await Deal.findById(req.params.id);
-    if (!deal) throw ApiError.notFound();
-    if (deal.brand.toString() !== req.auth.sub) throw ApiError.forbidden();
+    if (!deal) throw ApiError.notFound('Collaboration not found');
 
+    const isParty = [deal.brand.toString(), deal.creator.toString()].includes(req.auth.sub);
+    if (!isParty && req.auth.role !== 'admin') throw ApiError.forbidden();
+
+    const progress = deliverableProgress(deal);
+    ok(res, {
+        ...progress,
+        allApproved: allDeliverablesApproved(deal),
+        outstanding: outstandingDeliverables(deal),
+        revisions: {
+            used: deal.revisionCount ?? 0,
+            allowed: deal.terms?.revisionsAllowed ?? INCLUDED_REVISIONS,
+        },
+        reviewDeadline: deal.reviewDeadline ?? null,
+    });
+});
+
+/**
+ * Move a collaboration into revision, recording who asked and why.
+ *
+ * Shared by the per-submission review below and the deal-level endpoint, so the
+ * Policy 5.4 cap and the Policy 5.5 diversion cannot be enforced on one path and
+ * not the other. It was nearly two paths: the obvious way to write the review
+ * endpoint is to repeat the cap check, and the two copies then disagree the
+ * first time either is changed.
+ */
+async function moveToRevision(deal, { actorId, note }) {
     const check = canRequestRevision(deal);
     if (!check.allowed) {
         // Move to Resolution rather than refusing outright — the Brand still
@@ -321,18 +424,145 @@ export const requestRevision = catchAsync(async (req, res) => {
         deal.resolutionDeadline = new Date(Date.now() + RESOLUTION_AUTO_DAYS * 24 * 3600 * 1000);
         await deal.save();
         const moved = await transitionDeal({
-            dealId: deal.id, to: 'resolution', actor: 'brand', actorId: req.auth.sub,
+            dealId: deal.id, to: 'resolution', actor: 'brand', actorId,
             note: `All ${check.limit} agreed revision rounds used — moved to Resolution (Policy 5.5)`,
         });
-        return ok(res, {
+        return {
             deal: moved,
             revisionsExhausted: true,
             message: `You have used all ${check.limit} agreed revision rounds. Choose a resolution option.`,
-        });
+        };
     }
 
     /**
-     * The counter is incremented by `transitionDeal`, not here.
+     * The counter is incremented by `transitionDeal`, not here — see the note on
+     * the deal-level endpoint below.
+     */
+    const updated = await transitionDeal({
+        dealId: deal.id, to: 'revision', actor: 'brand', actorId,
+        note: note || `Revision ${check.used + 1} of ${check.limit} requested`,
+    });
+    return {
+        deal: updated,
+        revisionsUsed: updated.revisionCount,
+        revisionsAllowed: check.limit,
+        revisionsRemaining: Math.max(0, check.limit - (updated.revisionCount ?? 0)),
+    };
+}
+
+/**
+ * The brand's decision on one submission.
+ *
+ * ── Nothing here approves content on its own ───────────────────────────────
+ *
+ * `approved` is written only by this handler, only for a brand, and only with a
+ * submission id in the request — a deliberate act on a specific piece of work.
+ * The Policy 5.3 sweep completes a collaboration whose review window has run
+ * out and releases the money, as the policy requires, but it does NOT mark any
+ * submission approved: nobody looked at it, and a record saying otherwise would
+ * be a false one. The workspace says which of the two happened.
+ *
+ * ── Approving is not paying ────────────────────────────────────────────────
+ *
+ * This records the decision. Releasing the escrow is the separate, explicit
+ * `completed` transition, and it is refused until every agreed deliverable has
+ * an approval recorded here. Two steps because they are two decisions, and the
+ * money one is irreversible.
+ *
+ * ── Feedback is required on a revision ─────────────────────────────────────
+ *
+ * A revision request without a reason gives the creator nothing to act on;
+ * they resubmit a guess, and it costs one of the agreed rounds.
+ */
+export const reviewSubmissionSchema = z.object({
+    decision: z.enum(['approved', 'revision']),
+    feedback: z.string().max(2000).optional(),
+}).strict().refine(
+    (b) => b.decision !== 'revision' || Boolean(b.feedback?.trim()),
+    { message: 'Say what needs to change', path: ['feedback'] },
+);
+
+export const reviewSubmission = catchAsync(async (req, res) => {
+    const deal = await Deal.findById(req.params.id);
+    if (!deal) throw ApiError.notFound('Collaboration not found');
+    if (deal.brand.toString() !== req.auth.sub) throw ApiError.forbidden();
+
+    const submission = deal.workSubmissions.id(req.params.submissionId);
+    if (!submission) throw ApiError.notFound('Submission not found');
+
+    if (submission.reviewStatus !== 'pending')
+        throw ApiError.conflict('This submission has already been reviewed', {
+            reviewStatus: submission.reviewStatus,
+            decidedAt: submission.review?.at ?? null,
+        });
+
+    const { decision, feedback } = req.body;
+    const at = new Date();
+
+    /*
+      The status and the decision record are written together, here and nowhere
+      else. A status with no record cannot answer "when, and on what basis" —
+      the question that matters when a release is disputed later.
+    */
+    submission.review = {
+        decision,
+        feedback: feedback?.trim() ?? '',
+        at,
+        by: new Types.ObjectId(req.auth.sub),
+    };
+    submission.reviewStatus = decision === 'approved' ? 'approved' : 'rejected';
+    submission.reviewNote = feedback?.trim() ?? '';
+
+    if (decision === 'revision') {
+        await deal.save();
+        const result = await moveToRevision(deal, { actorId: req.auth.sub, note: feedback?.trim() });
+        await notify({
+            user: deal.creator.toString(),
+            type: 'deal.revision_requested',
+            title: 'A revision was requested',
+            body: `"${deal.title}" — ${feedback?.trim() || 'the brand asked for changes'}`,
+            data: dealPayload(deal),
+        }).catch(() => void 0);
+        return ok(res, result);
+    }
+
+    await deal.save();
+
+    const allApproved = allDeliverablesApproved(deal);
+    await notify({
+        user: deal.creator.toString(),
+        type: 'deal.submission_approved',
+        title: 'Your submission was approved',
+        body: allApproved
+            ? `"${deal.title}" — every deliverable is approved. Payment is released when the brand closes the collaboration.`
+            : `"${deal.title}" — ${submission.deliverable?.label ?? 'your submission'} was approved.`,
+        data: dealPayload(deal),
+    }).catch(() => void 0);
+
+    ok(res, {
+        deal,
+        submission: submission.toObject(),
+        allApproved,
+        outstanding: outstandingDeliverables(deal),
+    });
+});
+
+/**
+ * Policy 5.4 — a revision request is only valid while agreed rounds remain.
+ * Once they are exhausted the Collaboration moves to Resolution (Policy 5.5)
+ * instead of silently accepting a third round.
+ *
+ * Kept as the collaboration-level route. The workspace reviews a specific
+ * submission (above), which records the decision against it; this stays for
+ * callers that have no submission in hand, and both run the same cap check.
+ */
+export const requestRevision = catchAsync(async (req, res) => {
+    const deal = await Deal.findById(req.params.id);
+    if (!deal) throw ApiError.notFound();
+    if (deal.brand.toString() !== req.auth.sub) throw ApiError.forbidden();
+
+    /**
+     * The revision counter is incremented by `transitionDeal`, not here.
      *
      * Both used to do it: this handler added one and saved, then
      * `applyStateSideEffects` in deals.service.js added another on the
@@ -344,16 +574,7 @@ export const requestRevision = catchAsync(async (req, res) => {
      * The state machine owns state changes; that is the rule this module states
      * everywhere else, and it is the half that has to stay.
      */
-    const updated = await transitionDeal({
-        dealId: deal.id, to: 'revision', actor: 'brand', actorId: req.auth.sub,
-        note: req.body?.note ?? `Revision ${check.used + 1} of ${check.limit} requested`,
-    });
-    ok(res, {
-        deal: updated,
-        revisionsUsed: updated.revisionCount,
-        revisionsAllowed: check.limit,
-        revisionsRemaining: Math.max(0, check.limit - (updated.revisionCount ?? 0)),
-    });
+    ok(res, await moveToRevision(deal, { actorId: req.auth.sub, note: req.body?.note }));
 });
 
 /** Policy 15 — the Creator confirms the disclosure that will appear on the content. */
